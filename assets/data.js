@@ -154,7 +154,7 @@
       p.records.forEach(function (r) {
         if (!best || (AWARD_ORDER[r.award] || 0) > (AWARD_ORDER[best.award] || 0) || ((AWARD_ORDER[r.award] || 0) === (AWARD_ORDER[best.award] || 0) && r.rank < best.rank)) best = r;
       });
-      p.bestAward = best ? best.award : null; p.bestRank = best ? best.rank : null;
+      p.bestAward = best ? best.award : null; p.bestRank = best ? best.rank : null; p.bestContestId = best ? best.contestId : null;
       people.push(p); peopleById[id] = p;
       (dupGroups[name] = dupGroups[name] || []).push(id);
     });
