@@ -1,0 +1,1149 @@
+/* ============================================================
+ * OI·竞迹 — app.js（前端应用：路由 + 四大功能视图 + 图表）
+ * 消费 assets/data.js 生成的 window.OIER_DATA（结构化数据）
+ * ============================================================ */
+(function () {
+  'use strict';
+
+  var DB = window.OIER_DATA;
+  var view = document.getElementById('view');
+
+  /* ---------------- 工具函数 ---------------- */
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function $(sel, root) { return (root || document).querySelector(sel); }
+  function debounce(fn, delay) { var timer; return function () { var args = arguments, self = this; clearTimeout(timer); timer = setTimeout(function () { fn.apply(self, args); }, delay); }; }
+  function $all(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+  var TYPE_COLOR = { 'NOI': 'var(--t-noi)', 'NOIP': 'var(--t-noip)', 'CSP-S': 'var(--t-csps)', 'CSP-J': 'var(--t-cspj)' };
+  var TYPE_CLASS = { 'NOI': 'c-noi', 'NOIP': 'c-noip', 'CSP-S': 'c-csps', 'CSP-J': 'c-cspj' };
+  var AWARD_CLASS = { '金牌': 'gold', '银牌': 'silver', '铜牌': 'bronze', '一等奖': 'a1', '二等奖': 'a2', '三等奖': 'a3' };
+  var SEG_CLASS = { '金牌': 'seg-gold', '银牌': 'seg-silver', '铜牌': 'seg-bronze', '一等奖': 'seg-a1', '二等奖': 'seg-a2', '三等奖': 'seg-a3' };
+
+  function awardBadge(a) { return '<span class="badge ' + (AWARD_CLASS[a] || 'type') + '">' + esc(a) + '</span>'; }
+  function typeDot(t) { return '<span class="type-dot ' + esc(t) + '" title="' + esc(t) + '"></span>'; }
+  function verifyBadge(r) {
+    return r.verified
+      ? '<span class="badge ok" title="已对照来源核验">✓ 已核验</span>'
+      : '<span class="badge warn" title="' + esc(r.note || '待人工核验') + '">⚠ 待核验</span>';
+  }
+  function rankPill(rank) {
+    var cls = rank === 1 ? ' r1' : rank === 2 ? ' r2' : rank === 3 ? ' r3' : '';
+    return '<span class="rank-pill' + cls + '">' + rank + '</span>';
+  }
+  function contestById(id) { return DB.contestById[id]; }
+  function personLink(p, extra) {
+    return '<a href="#/player/' + p.id + '"' + (extra || '') + '>' + esc(p.name) + '</a>';
+  }
+
+  function toast(msg) {
+    var t = $('#toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(t._tm);
+    t._tm = setTimeout(function () { t.classList.remove('show'); }, 2600);
+  }
+
+  /* 让条形图从 0 动画展开 */
+  function animateBars(root) {
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        $all('[data-w]', root || document).forEach(function (el) { el.style.width = el.getAttribute('data-w'); });
+      });
+    });
+  }
+
+  /* ---------------- 路由 ---------------- */
+  function parseHash() {
+    var h = location.hash.replace(/^#\/?/, '');
+    var qi = h.indexOf('?');
+    var path = (qi >= 0 ? h.slice(0, qi) : h);
+    var params = {};
+    if (qi >= 0) {
+      h.slice(qi + 1).split('&').forEach(function (kv) {
+        if (!kv) return;
+        var p = kv.split('=');
+        params[decodeURIComponent(p[0])] = decodeURIComponent(p[1] || '');
+      });
+    }
+    var seg = path.split('/').filter(Boolean);
+    return { seg: seg, params: params, path: path };
+  }
+  function buildHash(segArr, params) {
+    var qs = Object.keys(params).filter(function (k) { return params[k] !== '' && params[k] != null; })
+      .map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); }).join('&');
+    return '#/' + segArr.join('/') + (qs ? '?' + qs : '');
+  }
+  function setParamsSilently(segArr, params) {
+    history.replaceState(null, '', buildHash(segArr, params));
+  }
+
+  var PAGE = { players: 60, search: 40, contest: 100 };
+  var visible = { players: PAGE.players, search: PAGE.search, contest: PAGE.contest };
+
+  var state = {
+    players: { q: '', province: '', grade: '', sort: 'count' },
+    contest: { q: '', province: '', grade: '', school: '', sortKey: 'rank', sortDir: 1 },
+    analysis: { tab: 'province', metric: 'people' },
+    search: { q: '' }
+  };
+
+  /* ---------------- 查询逻辑 ---------------- */
+  /* 名称索引匹配：中文 / 全拼 / 首字母 / 简称（省份与学校共用） */
+  function matchIndexEntry(entry, q) {
+    if (!entry) return false;
+    var keys = entry.keys;
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      if (!k) continue;
+      if (k === entry.ini) { if (q.length >= 2 && k.indexOf(q) >= 0) return true; }
+      else if (k.indexOf(q) >= 0) return true;
+    }
+    return false;
+  }
+  function matchProvince(q, prov) { return matchIndexEntry(DB.provinceIndex[prov], q); }
+  function matchSchool(q, school) { return matchIndexEntry(DB.schoolIndex[school], q); }
+
+  function matchPerson(q, p) {
+    if (!q) return true;
+    q = q.trim().toLowerCase();
+    if (!q) return true;
+    if (p.name.toLowerCase().indexOf(q) >= 0) return true;
+    if (p.py.indexOf(q) >= 0) return true;
+    if (q.length >= 2 && p.ini.indexOf(q) === 0) return true;
+    for (var i = 0; i < p.aliases.length; i++) if (p.aliases[i].toLowerCase().indexOf(q) >= 0) return true;
+    if (matchProvince(q, p.province)) return true;
+    for (var k = 0; k < p.schools.length; k++) if (matchSchool(q, p.schools[k].n)) return true;
+    for (var j = 0; j < p.records.length; j++) if (matchSchool(q, p.records[j].school)) return true;
+    return false;
+  }
+
+  /* 省份 / 学校实体命中（用于搜索结果中的实体卡片） */
+  function findProvinces(q) {
+    q = q.trim().toLowerCase();
+    if (!q) return [];
+    return Object.keys(DB.provinceIndex).filter(function (pv) { return matchProvince(q, pv); })
+      .map(function (pv) { return DB.provinceIndex[pv]; });
+  }
+  function findSchools(q) {
+    q = q.trim().toLowerCase();
+    if (!q) return [];
+    return Object.keys(DB.schoolIndex).filter(function (sc) { return matchSchool(q, sc); })
+      .map(function (sc) { return DB.schoolIndex[sc]; })
+      .sort(function (a, b) { return b.people - a.people; });
+  }
+  function attachEntitySuggestions(input, onChoose) {
+    var wrap = document.createElement('div');
+    wrap.className = 'entity-autocomplete';
+    input.parentNode.insertBefore(wrap, input);
+    wrap.appendChild(input);
+    var menu = document.createElement('div');
+    menu.className = 'autocomplete-menu';
+    menu.hidden = true;
+    wrap.appendChild(menu);
+    function update() {
+      var q = input.value.trim().toLowerCase();
+      if (q.length < 2) { menu.hidden = true; return; }
+      var options = [];
+      Object.keys(DB.provinceIndex).forEach(function (name) {
+        if (matchProvince(q, name)) options.push({ kind: '省份', name: name, hint: DB.provinceIndex[name].py });
+      });
+      Object.keys(DB.schoolIndex).forEach(function (name) {
+        if (matchSchool(q, name)) options.push({ kind: '学校', name: name, hint: DB.schoolIndex[name].province || '' });
+      });
+      options = options.slice(0, 8);
+      menu.innerHTML = options.map(function (o, i) {
+        return '<button type="button" class="suggestion" data-index="' + i + '"><span>' + esc(o.name) + '</span><small>' + esc(o.kind + (o.hint ? ' · ' + o.hint : '')) + '</small></button>';
+      }).join('');
+      menu.hidden = !options.length;
+      $all('.suggestion', menu).forEach(function (button, i) {
+        button.addEventListener('mousedown', function (e) { e.preventDefault(); menu.hidden = true; onChoose(options[i]); });
+      });
+    }
+    input.addEventListener('input', update);
+    input.addEventListener('blur', function () { setTimeout(function () { menu.hidden = true; }, 120); });
+    input.addEventListener('focus', update);
+  }
+  function gradeOrder(p) { return p.currentGradeIndex == null ? 99 : p.currentGradeIndex; }
+
+  var PROVINCES = (function () {
+    var m = {};
+    DB.people.forEach(function (p) { m[p.province] = 1; });
+    return Object.keys(m).sort(function (a, b) { return a.localeCompare(b, 'zh'); });
+  })();
+
+  var GRADES = ['初一', '初二', '初三', '高一', '高二', '高三'];
+  function matchGradeFilter(p, g) {
+    if (!g) return true;
+    if (g === '初中') return p.currentGradeIndex != null && p.currentGradeIndex >= 7 && p.currentGradeIndex <= 9;
+    if (g === '高中') return p.currentGradeIndex != null && p.currentGradeIndex >= 10 && p.currentGradeIndex <= 12;
+    return p.currentGrade === g;
+  }
+
+  function sortPeople(list, mode) {
+    var arr = list.slice();
+    if (mode === 'name') arr.sort(function (a, b) { return a.name.localeCompare(b.name, 'zh'); });
+    else if (mode === 'grade') arr.sort(function (a, b) { return gradeOrder(a) - gradeOrder(b) || b.count - a.count; });
+    else if (mode === 'gradeDesc') arr.sort(function (a, b) { return gradeOrder(b) - gradeOrder(a) || b.count - a.count; });
+    else if (mode === 'recent') arr.sort(function (a, b) { return (b.lastYear || 0) - (a.lastYear || 0) || b.count - a.count; });
+    else if (mode === 'award') arr.sort(function (a, b) {
+      return (DB.awardOrder[b.bestAward] || 0) - (DB.awardOrder[a.bestAward] || 0) || (a.bestRank || 999) - (b.bestRank || 999);
+    });
+    else arr.sort(function (a, b) { return b.count - a.count || (b.lastYear || 0) - (a.lastYear || 0); });
+    return arr;
+  }
+
+  function personCard(p) {
+    var dup = (DB.dupGroups[p.name] || []).length > 1;
+    return '<a class="pcard" href="#/player/' + p.id + '">' +
+      '<div class="nm">' + esc(p.name) +
+      '<span class="py">' + esc(p.py) + '</span>' +
+      (dup ? '<span class="badge dup" title="库内存在同名选手">同名×' + DB.dupGroups[p.name].length + '</span>' : '') +
+      (p.unverified ? '<span class="badge warn">待核验×' + p.unverified + '</span>' : '') +
+      '</div>' +
+      '<div class="meta">' + esc(p.province) + ' · ' + esc(p.currentSchool) + '</div>' +
+      '<div class="row">' +
+      '<span class="badge grade' + (p.currentGrade === '已毕业' ? ' grad' : '') + '" title="' + p.cohort + ' 届（按 ' + DB.season + '–' + (DB.season + 1) + ' 学年推算）">' + esc(p.currentGrade) + ' · ' + p.cohort + '届</span>' +
+      (p.bestAward ? awardBadge(p.bestAward) : '<span class="badge type">暂无奖项记录</span>') +
+      '<span class="badge type">' + p.count + ' 条记录</span>' +
+      '<span class="yrs">' + p.firstYear + '–' + p.lastYear + '</span>' +
+      '</div></a>';
+  }
+
+  /* ---------------- 视图：首页 ---------------- */
+  function renderHome() {
+    var c = DB.meta.counts;
+    var featured = DB.people.slice().sort(function (a, b) {
+      return (DB.awardOrder[b.bestAward] || 0) - (DB.awardOrder[a.bestAward] || 0) || (a.bestRank || 999) - (b.bestRank || 999);
+    }).slice(0, 3);
+    var hotContests = ['noi-2025', 'csp-s-2025', 'noip-2024', 'csp-j-2025'].map(contestById);
+
+    view.innerHTML =
+      '<div class="view">' +
+      '<section class="hero">' +
+        '<div class="hero-badge">● 演示数据 ' + esc(DB.meta.version) + ' · 更新于 ' + esc(DB.meta.generatedAt) + '</div>' +
+        '<h1>把每一份比赛记录，<br><span class="grad">变成可查询、可追溯的历程</span></h1>' +
+        '<p class="sub">面向 OI 公开竞赛记录的查询与分析平台：选手档案 · 赛事结果 · 学校/地区分析 · 历程时间线。数据结构参考 OIerDb 的组织方式，每条记录带来源与核验状态。</p>' +
+        '<form class="search-big" id="hero-search">' +
+          '<span class="s-ic"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg></span>' +
+          '<input type="text" id="hero-q" placeholder="搜索选手 / 赛事 / 学校，如：陈子航、NOI 2025、雅礼、czh" autocomplete="off">' +
+          '<button type="submit">搜索</button>' +
+        '</form>' +
+        '<div class="hero-chips"><span class="lbl">试试：</span>' +
+          '<a class="chip" href="#/search?q=' + encodeURIComponent('NOI 2025') + '">NOI 2025</a>' +
+          '<a class="chip" href="#/search?q=' + encodeURIComponent('陈子航') + '">陈子航（同名演示）</a>' +
+          '<a class="chip" href="#/search?q=' + encodeURIComponent('小舟') + '">别名搜索「小舟」</a>' +
+          '<a class="chip" href="#/search?q=czh">拼音首字母 czh</a>' +
+          '<a class="chip" href="#/search?q=zhejiang">省份拼音 zhejiang</a>' +
+          '<a class="chip" href="#/search?q=hzez">学校简称 hzez</a>' +
+          '<a class="chip" href="#/players?sort=grade">按年级排序</a>' +
+        '</div>' +
+      '</section>' +
+
+      '<div class="stats-strip">' +
+        '<div class="stat"><div class="v">' + c.people + '</div><div class="k">选手（示例）</div></div>' +
+        '<div class="stat"><div class="v">' + c.records + '</div><div class="k">参赛记录</div></div>' +
+        '<div class="stat"><div class="v">' + c.contests + '</div><div class="k">覆盖赛事</div></div>' +
+        '<div class="stat"><div class="v">' + c.provinces + '</div><div class="k">覆盖省份</div></div>' +
+        '<div class="stat"><div class="v">' + c.schools + '<small>+</small></div><div class="k">出现学校</div></div>' +
+        '<div class="stat hl"><div class="v">' + c.unverified + '</div><div class="k">待核验记录</div></div>' +
+      '</div>' +
+
+      '<div class="grid-2" style="margin-top:20px">' +
+        '<div>' +
+          '<h2 class="section-title">热门赛事</h2>' +
+          '<div class="contest-grid">' + hotContests.map(contestCard).join('') + '</div>' +
+          '<h2 class="section-title">焦点选手 <span class="muted small" style="font-weight:400">（按演示数据中的最佳奖项排序）</span></h2>' +
+          '<div class="people-grid">' + featured.map(personCard).join('') + '</div>' +
+        '</div>' +
+        '<div>' +
+          healthCard() +
+          '<div class="card">' +
+            '<div class="card-title">数据源 <span class="sub">Source 表</span></div>' +
+            DB.sources.map(function (s) {
+              return '<div style="margin-bottom:10px"><div style="font-size:13.5px;font-weight:600">' + esc(s.name) +
+                ' <span class="badge type">' + esc(s.type) + '</span></div>' +
+                '<div class="small muted">采集于 ' + esc(s.accessed) + (s.url ? ' · <a href="' + esc(s.url) + '" target="_blank" rel="noopener">链接</a>' : '') + '</div></div>';
+            }).join('') +
+            '<a class="small" href="#/about">查看完整数据说明 →</a>' +
+          '</div>' +
+          '<div class="card">' +
+            '<div class="card-title">统计口径</div>' +
+            '<p class="small muted" style="margin:0">所有统计基于本演示数据集（' + c.records + ' 条记录），按记录去重计数；' +
+            '「有记录的选手数」≠「真实参赛人数」。每个分析图表旁均附口径说明。</p>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      '</div>';
+
+    var form = $('#hero-search');
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var q = $('#hero-q').value.trim();
+      location.hash = buildHash(['search'], { q: q });
+    });
+  }
+
+  function healthCard() {
+    var c = DB.meta.counts;
+    return '<div class="card">' +
+      '<div class="card-title">数据体检 <span class="sub">生成时自动计算</span></div>' +
+      '<div class="kv-grid" style="grid-template-columns:1fr 1fr">' +
+        '<div class="kv"><b>' + c.dupNameGroups + ' 组</b><span>同名选手（需消歧）</span></div>' +
+        '<div class="kv"><b>' + c.unverified + ' 条</b><span>待核验记录</span></div>' +
+        '<div class="kv"><b>2022–2025</b><span>覆盖年份</span></div>' +
+        '<div class="kv"><b>' + c.records + ' 条</b><span>全部带来源标注</span></div>' +
+      '</div>' +
+      '<p class="small muted" style="margin:10px 0 0">正式实现中，此处应展示导入报告的完整摘要：新增 / 变更 / 无法解析 / 低置信匹配的数量与明细链接。</p>' +
+      '</div>';
+  }
+
+  function contestCard(ct) {
+    return '<a class="ccard" href="#/contest/' + ct.id + '">' +
+      '<div class="t">' + typeDot(ct.type) + esc(ct.name) + '</div>' +
+      '<div class="full">' + esc(ct.full) + '</div>' +
+      '<div class="row"><span class="badge type">' + ct.year + ' 年 ' + ct.month + ' 月</span>' +
+      '<span class="badge type">满分 ' + ct.maxScore + '</span>' +
+      '<span class="cnt">' + ct.recordCount + ' 条记录</span></div></a>';
+  }
+
+  /* ---------------- 视图：统一搜索 ---------------- */
+  function renderSearch() {
+    var q = state.search.q;
+    view.innerHTML =
+      '<div class="view">' +
+      '<h1 class="section-title">搜索</h1>' +
+      '<div class="toolbar"><div class="grow">' +
+      '<input type="search" id="search-q" placeholder="姓名 / 拼音 / 学校 / 省份（支持拼音、首字母、简称）/ 赛事名…" value="' + esc(q) + '">' +
+      '</div><span class="count" id="search-count"></span></div>' +
+      '<div id="search-body"></div>' +
+      '</div>';
+    var input = $('#search-q');
+    input.addEventListener('input', function () {
+      state.search.q = input.value;
+      visible.search = PAGE.search;
+      setParamsSilently(['search'], { q: input.value });
+      renderSearchBody();
+    });
+    input.focus();
+    renderSearchBody();
+  }
+
+  function renderSearchBody() {
+    var q = state.search.q.trim();
+    var body = $('#search-body');
+    if (!q) {
+      body.innerHTML = '<div class="empty"><div class="big">🔍</div><b>输入关键词开始搜索</b><p class="small">支持姓名、别名（如「小舟」）、拼音与首字母（如 czh）、学校（如 雅礼 / hzez / renda）、省份（如 浙江 / zhejiang / zj）、赛事名。</p></div>';
+      $('#search-count').textContent = '';
+      return;
+    }
+    var people = DB.people.filter(function (p) { return matchPerson(q, p); });
+    var contests = DB.contests.filter(function (c) {
+      return (c.name + c.full + c.type + c.year).toLowerCase().indexOf(q.toLowerCase()) >= 0;
+    });
+    var provHits = findProvinces(q), schoolHits = findSchools(q);
+    $('#search-count').textContent = '选手 ' + people.length + ' · 赛事 ' + contests.length +
+      (provHits.length ? ' · 省份 ' + provHits.length : '') + (schoolHits.length ? ' · 学校 ' + schoolHits.length : '');
+
+    var html = '';
+    if (provHits.length || schoolHits.length) {
+      html += '<h2 class="section-title">省份 / 学校</h2><div class="entity-hits">' +
+        provHits.map(function (e) {
+          return '<a class="chip prov" href="#/players?province=' + encodeURIComponent(e.name) + '">📍 ' + esc(e.name) + ' <span class="py">' + esc(e.py) + '</span><span class="n">' + e.people + ' 人</span></a>';
+        }).join('') +
+        schoolHits.slice(0, 10).map(function (e) {
+          return '<a class="chip school" href="#/players?q=' + encodeURIComponent(e.name) + '">🏫 ' + esc(e.name) + ' <span class="py">' + esc(e.ini) + (e.aliases.length ? ' · ' + esc(e.aliases[0]) : '') + '</span><span class="n">' + e.people + ' 人 · ' + e.records + ' 条</span></a>';
+        }).join('') +
+        '</div>';
+    }
+    if (people.length) {
+      var dupHit = people.length > 1 && people.every(function (p) { return p.name === people[0].name; });
+      html += '<h2 class="section-title">选手' + (dupHit ? ' <span class="badge dup">发现 ' + people.length + ' 位同名选手，请选择</span>' : '') + '</h2>';
+      if (dupHit) {
+        html += '<div class="callout info"><span class="ic">ℹ</span><span>同名选手<b>不会自动合并</b>：请按省份 / 学校确认你要查看的人。这是「Better OIerDb」的消歧设计——姓名只是检索入口，不是身份主键。</span></div>';
+      }
+      html += '<div class="people-grid">' + people.slice(0, visible.search).map(personCard).join('') + '</div>' +
+          (people.length > visible.search ? '<button class="btn more-results" data-act="more-search">加载更多选手（已显示 ' + visible.search + ' / ' + people.length + '）</button>' : '');
+    }
+    if (contests.length) {
+      html += '<h2 class="section-title">赛事</h2><div class="contest-grid">' + contests.map(contestCard).join('') + '</div>';
+    }
+    if (!people.length && !contests.length) {
+      html = '<div class="empty"><div class="big">🫥</div><b>没有找到「' + esc(q) + '」相关的选手或赛事</b>' +
+        '<p class="small">演示数据集共 ' + DB.meta.counts.people + ' 位选手、' + DB.meta.counts.contests + ' 场赛事。试试「陈子航」「NOI 2025」「雅礼」「lwz」「zhejiang」「hzez」。</p></div>';
+    }
+    body.innerHTML = html;
+  }
+
+  /* ---------------- 视图：选手列表 ---------------- */
+  function renderPlayers() {
+    var s = state.players;
+    view.innerHTML =
+      '<div class="view">' +
+      '<h1 class="section-title">选手查询</h1>' +
+      '<div class="toolbar">' +
+        '<div class="grow"><input type="search" id="pl-q" placeholder="姓名 / 拼音 / 学校 / 省份（支持拼音与简称，如 zhejiang、hzez、雅礼）…" value="' + esc(s.q) + '"></div>' +
+        '<select id="pl-prov"><option value="">全部省份</option>' +
+          PROVINCES.map(function (pv) { return '<option value="' + esc(pv) + '"' + (s.province === pv ? ' selected' : '') + '>' + esc(pv) + '</option>'; }).join('') +
+        '</select>' +
+        '<select id="pl-grade" title="按当前年级筛选（' + DB.season + '–' + (DB.season + 1) + ' 学年）"><option value="">全部年级</option>' +
+          GRADES.map(function (g) { return '<option value="' + esc(g) + '"' + (s.grade === g ? ' selected' : '') + '>' + esc(g) + '</option>'; }).join('') +
+          '<option value="初中"' + (s.grade === '初中' ? ' selected' : '') + '>初中在读</option>' +
+          '<option value="高中"' + (s.grade === '高中' ? ' selected' : '') + '>高中在读</option>' +
+          '<option value="已毕业"' + (s.grade === '已毕业' ? ' selected' : '') + '>已毕业</option>' +
+        '</select>' +
+        '<select id="pl-sort">' +
+          '<option value="count"' + (s.sort === 'count' ? ' selected' : '') + '>按记录数</option>' +
+          '<option value="award"' + (s.sort === 'award' ? ' selected' : '') + '>按最佳奖项</option>' +
+          '<option value="recent"' + (s.sort === 'recent' ? ' selected' : '') + '>按最近活跃</option>' +
+          '<option value="grade"' + (s.sort === 'grade' ? ' selected' : '') + '>按年级（低→高）</option>' +
+          '<option value="gradeDesc"' + (s.sort === 'gradeDesc' ? ' selected' : '') + '>按年级（高→低）</option>' +
+          '<option value="name"' + (s.sort === 'name' ? ' selected' : '') + '>按姓名</option>' +
+        '</select>' +
+        '<span class="count" id="pl-count"></span>' +
+      '</div>' +
+      '<div id="pl-hint"></div>' +
+      '<div id="players-list"></div>' +
+      '</div>';
+
+    function sync() {
+      setParamsSilently(['players'], { q: s.q, province: s.province, grade: s.grade, sort: s.sort });
+      visible.players = PAGE.players;
+      renderPlayersList();
+    }
+    var qEl = $('#pl-q'), pvEl = $('#pl-prov'), stEl = $('#pl-sort'), grEl = $('#pl-grade');
+    qEl.addEventListener('input', debounce(function () { s.q = qEl.value; sync(); }, 160));
+    pvEl.addEventListener('change', function () { s.province = pvEl.value; sync(); });
+    grEl.addEventListener('change', function () { s.grade = grEl.value; sync(); });
+    stEl.addEventListener('change', function () { s.sort = stEl.value; sync(); });
+    renderPlayersList();
+  }
+
+  function renderPlayersList() {
+    var s = state.players;
+    var list = DB.people.filter(function (p) {
+      return (!s.province || p.province === s.province) && matchGradeFilter(p, s.grade) && matchPerson(s.q, p);
+    });
+    list = sortPeople(list, s.sort);
+    $('#pl-count').textContent = '共 ' + list.length + ' 位选手';
+
+    var hint = $('#pl-hint'), hintHtml = '';
+    var q = s.q.trim();
+    if (q && DB.dupGroups[q] && list.length > 1) {
+      hintHtml = '<div class="callout info"><span class="ic">ℹ</span><span>「' + esc(q) + '」在库内有 <b>' + DB.dupGroups[q].length + ' 位同名选手</b>，已分别列出，不会自动合并。</span></div>';
+    }
+    var provHits = q ? findProvinces(q) : [], schoolHits = q ? findSchools(q) : [];
+    if (provHits.length || schoolHits.length) {
+      hintHtml += '<div class="entity-hits">' +
+        provHits.map(function (e) {
+          return '<a class="chip prov" href="#/players?province=' + encodeURIComponent(e.name) + '">📍 ' + esc(e.name) + ' <span class="py">' + esc(e.py) + '</span><span class="n">' + e.people + ' 人</span></a>';
+        }).join('') +
+        schoolHits.slice(0, 8).map(function (e) {
+          return '<a class="chip school" href="#/players?q=' + encodeURIComponent(e.name) + '">🏫 ' + esc(e.name) + ' <span class="py">' + esc(e.ini) + '</span><span class="n">' + e.people + ' 人</span></a>';
+        }).join('') +
+        '</div>';
+    }
+    if (s.sort === 'grade' || s.sort === 'gradeDesc' || s.grade) {
+      hintHtml += '<div class="small muted" style="margin:0 0 10px">年级按 <b>' + DB.season + '–' + (DB.season + 1) + ' 学年</b>推算：以最近一条记录的「当时年级」顺延，届别 = 预计高三毕业年份；7 月 NOI 记入上一学年。</div>';
+    }
+    hint.innerHTML = hintHtml;
+
+    var el = $('#players-list');
+    el.innerHTML = list.length
+      ? '<div class="people-grid">' + list.slice(0, visible.players).map(personCard).join('') + '</div>' +
+        (list.length > visible.players ? '<button class="btn more-results" data-act="more-players">加载更多选手（已显示 ' + visible.players + ' / ' + list.length + '）</button>' : '')
+      : '<div class="empty"><div class="big">🫥</div><b>没有匹配的选手</b><p class="small">换个关键词，或清空筛选条件。</p></div>';
+  }
+
+  /* ---------------- 视图：选手档案（含时间线） ---------------- */
+  function renderPlayer(id) {
+    var p = DB.peopleById[id];
+    if (!p) return render404('选手不存在');
+    var dups = (DB.dupGroups[p.name] || []).filter(function (x) { return x !== p.id; });
+    var rs = p.records.slice().sort(function (a, b) { return b.year - a.year || b.rank - a.rank; });
+
+    /* 时间线按年份分组（年份倒序；同年内按比赛月份倒序。
+       注意：不能用 Object.keys 的顺序——数字型键会被强制升序排列） */
+    var years = {}, yearOrder = [];
+    p.records.slice().sort(function (a, b) {
+      if (b.year !== a.year) return b.year - a.year;
+      return contestById(b.contestId).month - contestById(a.contestId).month;
+    }).forEach(function (r) {
+      if (!years[r.year]) { years[r.year] = []; yearOrder.push(r.year); }
+      years[r.year].push(r);
+    });
+    var tlHtml = yearOrder.map(function (y) {
+      return '<div class="tl-year">' + y + ' 年</div>' + years[y].map(function (r) {
+        var ct = contestById(r.contestId);
+        var top = r.rank <= 3 || r.award === '金牌';
+        return '<div class="tl-item' + (top ? ' top' : '') + '">' +
+          '<div class="l1">' + typeDot(ct.type) +
+            '<span class="cname"><a href="#/contest/' + ct.id + '">' + esc(ct.name) + '</a></span>' +
+            '<span class="badge type">' + esc(r.grade) + '</span>' +
+            awardBadge(r.award) + verifyBadge(r) +
+            '<span class="sp">' + ct.year + ' 年 ' + ct.month + ' 月</span>' +
+          '</div>' +
+          '<div class="l2">' +
+            '<span>成绩 <b>' + r.score + '</b> / ' + r.maxScore + '</span>' +
+            '<span>总名次 <b>' + rankPill(r.rank) + '</b> <span class="muted small">（数据集内 ' + r.total + ' 人）</span></span>' +
+            '<span>省内名次 <b>' + r.provinceRank + '</b></span>' +
+          '</div>' +
+          '<div class="l3">🏫 ' + esc(r.school) + ' · ' + esc(r.province) +
+            ' <span class="muted">| 来源：<a href="' + esc(r.sourceUrl) + '" target="_blank" rel="noopener">' + esc(sourceName(r.sourceId)) + '</a> · 采集 ' + esc(r.accessed) + '</span>' +
+          '</div>' +
+          (r.note ? '<div class="note-line">⚠ ' + esc(r.note) + '</div>' : '') +
+          '</div>';
+      }).join('');
+    }).join('');
+
+    var schoolHist = p.schools.map(function (s, i) {
+      return (i ? '<span class="arr">→</span>' : '') +
+        '<span class="sh">' + esc(s.n) + ' <span class="st">' + esc(s.st) + ' · ' + s.f + '–' + s.t + '</span></span>';
+    }).join('');
+
+    var tblRows = rs.map(function (r) {
+      var ct = contestById(r.contestId);
+      return '<tr>' +
+        '<td>' + typeDot(ct.type) + ' <a href="#/contest/' + ct.id + '">' + esc(ct.name) + '</a></td>' +
+        '<td>' + ct.year + '</td><td>' + esc(r.grade) + '</td>' +
+        '<td class="num">' + r.score + ' / ' + r.maxScore + '</td>' +
+        '<td>' + rankPill(r.rank) + '</td><td class="num">' + r.provinceRank + '</td>' +
+        '<td>' + awardBadge(r.award) + '</td>' +
+        '<td>' + esc(r.school) + '</td>' +
+        '<td>' + verifyBadge(r) + '</td></tr>';
+    }).join('');
+
+    view.innerHTML =
+      '<div class="view">' +
+      '<div class="crumb"><a href="#/players">选手</a> <span>/</span> <span>' + esc(p.name) + '</span> <span class="mono muted">' + esc(p.id) + '</span></div>' +
+
+      '<div class="profile-head">' +
+        '<div class="avatar">' + esc(p.name.charAt(0)) + '</div>' +
+        '<div class="info">' +
+          '<h1>' + esc(p.name) +
+            (dups.length ? '<span class="badge dup">同名×' + (dups.length + 1) + '</span>' : '') +
+            (p.unverified ? '<span class="badge warn">待核验×' + p.unverified + '</span>' : '') +
+          '</h1>' +
+          '<div class="alias mono">' + esc(p.py) + (p.aliases.length ? ' · 别名：' + p.aliases.map(esc).join('、') : '') + '</div>' +
+          '<div class="tags">' +
+            '<span class="badge prov">📍 ' + esc(p.province) + '</span>' +
+            '<span class="badge grade' + (p.currentGrade === '已毕业' ? ' grad' : '') + '" title="按 ' + DB.season + '–' + (DB.season + 1) + ' 学年推算；届别 = 预计高三毕业年份">🎓 ' + esc(p.currentGrade) + ' · ' + p.cohort + ' 届</span>' +
+            '<span class="badge type">🏫 ' + esc(p.currentSchool) + '</span>' +
+            '<span class="badge type">活跃 ' + p.firstYear + '–' + p.lastYear + '</span>' +
+            (p.bestAward ? '<span class="muted small">最佳：' + esc(p.bestAward) + '（' + esc(contestById(p.bestContestId).name) + ' 第 ' + p.bestRank + ' 名）</span>' : '') +
+          '</div>' +
+        '</div>' +
+        '<div class="profile-stats">' +
+          '<div class="pstat"><div class="v">' + p.count + '</div><div class="k">参赛记录</div></div>' +
+          '<div class="pstat"><div class="v">' + (p.bestRank != null ? p.bestRank : '—') + '</div><div class="k">最佳名次<small>（数据集内）</small></div></div>' +
+          '<div class="pstat"><div class="v">' + new Set(p.records.map(function (r) { return r.contestId; })).size + '</div><div class="k">覆盖赛事</div></div>' +
+          '<div class="pstat"><div class="v">' + new Set(p.records.map(function (r) { return r.year; })).size + '</div><div class="k">活跃年份</div></div>' +
+        '</div>' +
+      '</div>' +
+
+      (dups.length ? '<div class="callout warn" style="margin-top:14px"><span class="ic">⚠</span><span><b>同名消歧：</b>库内还有 ' +
+        dups.map(function (did) {
+          var o = DB.peopleById[did];
+          return '<a href="#/player/' + did + '">' + esc(o.name) + '（' + esc(o.province) + ' · ' + esc(o.currentSchool) + '）</a>';
+        }).join('、') +
+        '。两条档案独立维护，未做任何自动合并。</span></div>' : '') +
+
+      (p.unverified ? '<div class="callout warn" style="margin-top:' + (dups.length ? '10' : '14') + 'px"><span class="ic">⚠</span><span>该选手有 <b>' + p.unverified + '</b> 条记录处于「待核验」状态（见时间线中的标注与备注），展示时已与已核验记录明确区分。</span></div>' : '') +
+
+      '<div class="grid-2" style="margin-top:18px">' +
+        '<div>' +
+          '<h2 class="section-title">历程时间线</h2>' +
+          '<div class="timeline">' + tlHtml + '</div>' +
+          '<div class="split" style="margin-top:20px"><h2 class="section-title" style="margin:0">全部参赛记录</h2>' +
+          '<button class="btn" data-act="export-person" data-id="' + p.id + '">' +
+          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16"></path></svg>导出 CSV</button></div>' +
+          '<div class="table-wrap" style="margin-top:10px;max-height:none"><table class="tbl"><thead><tr>' +
+            '<th>赛事</th><th>年份</th><th>年级</th><th class="num">成绩</th><th>总名次</th><th class="num">省内</th><th>奖项</th><th>当时学校</th><th>核验</th>' +
+          '</tr></thead><tbody>' + tblRows + '</tbody></table></div>' +
+        '</div>' +
+        '<div>' +
+          '<div class="card"><div class="card-title">学校经历</div><div class="school-hist">' + schoolHist + '</div>' +
+          '<p class="small muted" style="margin:10px 0 0">学校经历按来源记录整理；「当时学校」以每条参赛记录为准，升学 / 转学不会覆盖历史。</p></div>' +
+          '<div class="card"><div class="card-title">数据质量</div>' +
+            '<div class="kv-grid" style="grid-template-columns:1fr 1fr">' +
+              '<div class="kv"><b>' + p.count + ' 条</b><span>参赛记录</span></div>' +
+              '<div class="kv"><b>' + (p.count - p.unverified) + ' 条</b><span>已核验</span></div>' +
+              '<div class="kv"><b>' + p.unverified + ' 条</b><span>待核验</span></div>' +
+              '<div class="kv"><b>' + (dups.length ? dups.length + ' 人' : '无') + '</b><span>同名档案</span></div>' +
+            '</div>' +
+            '<p class="small muted" style="margin:10px 0 0">正式实现中：每条记录可展开查看原始快照；发现错误可一键提交更正，进入人工复核队列。</p>' +
+          '</div>' +
+          '<div class="card"><div class="card-title">隐私边界</div>' +
+          '<p class="small muted" style="margin:0">仅收录与竞赛成绩相关的必要信息：姓名、学校、省份、年级与成绩。不推断性别、不收录联系方式与住址等个人信息。</p></div>' +
+        '</div>' +
+      '</div>' +
+      '</div>';
+  }
+
+  function sourceName(sid) {
+    var s = DB.sources.filter(function (x) { return x.id === sid; })[0];
+    return s ? s.name : sid;
+  }
+
+  /* ---------------- 视图：赛事列表 ---------------- */
+  function renderContests() {
+    var groups = ['NOI', 'NOIP', 'CSP-S', 'CSP-J'];
+    var names = { 'NOI': 'NOI · 全国决赛', 'NOIP': 'NOIP · 全国联赛', 'CSP-S': 'CSP-S · 第二轮（提高组）', 'CSP-J': 'CSP-J · 第二轮（入门组）' };
+    var html = groups.map(function (g) {
+      var list = DB.contests.filter(function (c) { return c.type === g; }).sort(function (a, b) { return b.year - a.year; });
+      return '<div><h2 class="section-title">' + typeDot(g) + ' ' + names[g] + '</h2>' +
+        '<div class="contest-grid">' + list.map(contestCard).join('') + '</div></div>';
+    }).join('');
+    view.innerHTML =
+      '<div class="view"><h1 class="section-title">赛事结果</h1>' +
+      '<div class="callout info"><span class="ic">ℹ</span><span>每场赛事仅收录演示数据集内的部分记录（非完整名单）；名次与奖项为<b>数据集内示意值</b>，正式实现将逐条对应官方公告。</span></div>' +
+      '<div class="contest-groups">' + html + '</div></div>';
+  }
+
+  /* ---------------- 视图：单场赛事结果 ---------------- */
+  function renderContest(id) {
+    var ct = contestById(id);
+    if (!ct) return render404('赛事不存在');
+    var s = state.contest;
+    var provList = (function () {
+      var m = {};
+      DB.records.forEach(function (r) { if (r.contestId === id) m[r.province] = 1; });
+      return Object.keys(m).sort(function (a, b) { return a.localeCompare(b, 'zh'); });
+    })();
+    var gradeList = (function () {
+      var m = {};
+      DB.records.forEach(function (r) { if (r.contestId === id) m[r.grade] = r.gradeIndex; });
+      return Object.keys(m).sort(function (a, b) { return m[a] - m[b]; });
+    })();
+    var schoolList = (function () {
+      var m = {};
+      DB.records.forEach(function (r) { if (r.contestId === id) m[r.school] = 1; });
+      return Object.keys(m).sort(function (a, b) { return a.localeCompare(b, 'zh'); });
+    })();
+
+    view.innerHTML =
+      '<div class="view">' +
+      '<div class="crumb"><a href="#/contests">赛事</a> <span>/</span> <span>' + esc(ct.name) + '</span></div>' +
+      '<div class="card" style="padding:22px 24px">' +
+        '<div class="split">' +
+          '<div><h1 style="font-size:24px;margin-bottom:2px">' + typeDot(ct.type) + ' ' + esc(ct.name) + '</h1>' +
+          '<div class="muted small">' + esc(ct.full) + '</div></div>' +
+          '<button class="btn primary" data-act="export-contest" data-id="' + ct.id + '">' +
+          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16"></path></svg>导出当前结果 CSV</button>' +
+        '</div>' +
+        '<div class="pill-row" style="margin-top:12px">' +
+          '<span class="badge type">' + ct.year + ' 年 ' + ct.month + ' 月</span>' +
+          '<span class="badge type">满分 ' + ct.maxScore + '</span>' +
+          '<span class="badge type">数据集内 ' + ct.recordCount + ' 条记录</span>' +
+          '<span class="badge type">来源：' + esc(sourceName(ct.sourceId)) + ' · 采集于 ' + esc(ct.accessed) + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="callout warn" style="margin-top:14px"><span class="ic">⚠</span><span><b>口径说明：</b>本表为演示数据，仅收录 ' + ct.recordCount + ' 条示例记录，非官方完整名单；名次为数据集内排名，奖项按名次比例示意划定（真实奖项以各省划线为准）。</span></div>' +
+
+      '<div class="toolbar">' +
+        '<div class="grow"><input type="search" id="ct-q" placeholder="在结果中搜索姓名 / 学校 / 省份（支持拼音、简称）…" value="' + esc(s.q) + '"></div>' +
+        '<select id="ct-prov"><option value="">全部省份</option>' +
+          provList.map(function (pv) { return '<option value="' + esc(pv) + '"' + (s.province === pv ? ' selected' : '') + '>' + esc(pv) + '</option>'; }).join('') +
+        '</select>' +
+        '<select id="ct-grade" title="按参赛时年级筛选"><option value="">全部年级</option>' +
+          gradeList.map(function (gd) { return '<option value="' + esc(gd) + '"' + (s.grade === gd ? ' selected' : '') + '>' + esc(gd) + '</option>'; }).join('') +
+        '</select>' +
+        '<select id="ct-school" title="按本场赛事记录中的学校筛选"><option value="">全部学校</option>' +
+          schoolList.map(function (sc) { return '<option value="' + esc(sc) + '"' + (s.school === sc ? ' selected' : '') + '>' + esc(sc) + '</option>'; }).join('') +
+        '</select>' +
+        '<span class="count" id="ct-count"></span>' +
+      '</div>' +
+      '<div id="ct-table"></div>' +
+      '</div>';
+
+    function sync() {
+      setParamsSilently(['contest', id], { q: s.q, province: s.province, grade: s.grade, school: s.school, sort: s.sortKey + (s.sortDir < 0 ? ':desc' : '') });
+      visible.contest = PAGE.contest;
+      renderContestTable(id);
+    }
+    var qEl = $('#ct-q'), pvEl = $('#ct-prov');
+    qEl.addEventListener('input', debounce(function () { s.q = qEl.value; sync(); }, 160));
+    pvEl.addEventListener('change', function () { s.province = pvEl.value; sync(); });
+    var grEl = $('#ct-grade');
+    grEl.addEventListener('change', function () { s.grade = grEl.value; sync(); });
+    attachEntitySuggestions(qEl, function (item) {
+      s.q = ''; qEl.value = '';
+      if (item.kind === '省份') s.province = item.name; else s.school = item.name;
+      pvEl.value = s.province; $('#ct-school').value = s.school; sync();
+    });
+    var scEl = $('#ct-school');
+    scEl.addEventListener('change', function () { s.school = scEl.value; sync(); });
+    renderContestTable(id);
+  }
+
+  function getContestRows(id) {
+    var s = state.contest;
+    var rows = DB.records.filter(function (r) { return r.contestId === id; });
+    if (s.province) rows = rows.filter(function (r) { return r.province === s.province; });
+    if (s.grade) rows = rows.filter(function (r) { return r.grade === s.grade; });
+    if (s.school) rows = rows.filter(function (r) { return r.school === s.school; });
+    if (s.q.trim()) {
+      var q = s.q.trim().toLowerCase();
+      rows = rows.filter(function (r) {
+        var p = DB.peopleById[r.personId];
+        return matchSchool(q, r.school) || matchProvince(q, r.province) || p.name.toLowerCase().indexOf(q) >= 0 || p.py.indexOf(q) >= 0 ||
+          (q.length >= 2 && p.ini.indexOf(q) === 0);
+      });
+    }
+    var dir = s.sortDir, key = s.sortKey;
+    rows.sort(function (a, b) {
+      var va, vb;
+      if (key === 'name') { va = DB.peopleById[a.personId].name; vb = DB.peopleById[b.personId].name; return va.localeCompare(vb, 'zh') * dir; }
+      if (key === 'school') { return a.school.localeCompare(b.school, 'zh') * dir; }
+      if (key === 'province') { return a.province.localeCompare(b.province, 'zh') * dir || a.rank - b.rank; }
+      if (key === 'grade') { return (a.gradeIndex - b.gradeIndex) * dir || a.rank - b.rank; }
+      if (key === 'score') { va = a.score; vb = b.score; }
+      else if (key === 'provRank') { va = a.provinceRank; vb = b.provinceRank; }
+      else { va = a.rank; vb = b.rank; }
+      return (va - vb) * dir;
+    });
+    return rows;
+  }
+
+  function renderContestTable(id) {
+    var rows = getContestRows(id);
+    var s = state.contest;
+    $('#ct-count').textContent = '显示 ' + rows.length + ' 条';
+    function th(label, key, cls) {
+      var on = s.sortKey === key;
+      var arrow = on ? '<span class="arr">' + (s.sortDir > 0 ? '▲' : '▼') + '</span>' : '';
+      return '<th class="sortable' + (cls ? ' ' + cls : '') + '" data-act="sort" data-key="' + key + '">' + label + arrow + '</th>';
+    }
+    var displayRows = rows.slice(0, visible.contest);
+    var html = rows.length ?
+      '<div class="table-wrap"><table class="tbl"><thead><tr>' +
+      th('总名次', 'rank') + th('省内', 'provRank', 'num') + th('姓名', 'name') + th('学校', 'school') + th('省份', 'province') +
+      th('年级', 'grade') + th('成绩', 'score', 'num') + '<th>奖项</th><th>核验</th><th>来源</th>' +
+      '</tr></thead><tbody>' +
+      displayRows.map(function (r) {
+        var p = DB.peopleById[r.personId];
+        return '<tr>' +
+          '<td>' + rankPill(r.rank) + ' <span class="muted small">/ ' + r.total + '</span></td>' +
+          '<td class="num">' + r.provinceRank + '</td>' +
+          '<td class="nm-cell">' + personLink(p) + '</td>' +
+          '<td>' + esc(r.school) + '</td>' +
+          '<td><span class="badge prov">' + esc(r.province) + '</span></td>' +
+          '<td>' + esc(r.grade) + '</td>' +
+          '<td class="num"><b>' + r.score + '</b> <span class="muted small">/ ' + r.maxScore + '</span></td>' +
+          '<td>' + awardBadge(r.award) + '</td>' +
+          '<td>' + verifyBadge(r) + '</td>' +
+          '<td><a class="small" href="' + esc(r.sourceUrl) + '" target="_blank" rel="noopener">' + esc(r.accessed) + '</a></td>' +
+          '</tr>';
+      }).join('') + '</tbody></table></div>' +
+      '<p class="small muted" style="margin-top:10px">提示：点击表头可排序；姓名可进入选手档案；「核验」列区分已核验与待核验记录。</p>' +
+      (rows.length > visible.contest ? '<button class="btn more-results" data-act="more-contest">加载更多结果（已显示 ' + visible.contest + ' / ' + rows.length + '）</button>' : '')
+      : '<div class="empty"><div class="big">🫥</div><b>没有符合条件的记录</b><p class="small">试试清空搜索词或省份筛选。</p></div>';
+    $('#ct-table').innerHTML = html;
+  }
+
+  /* ---------------- 视图：分析 ---------------- */
+  function renderAnalysis() {
+    var s = state.analysis;
+    var tabs = [['province', '按省份'], ['school', '按学校'], ['year', '按年份'], ['award', '奖项分布']];
+    view.innerHTML =
+      '<div class="view">' +
+      '<h1 class="section-title">学校 / 地区分析</h1>' +
+      '<div class="callout info"><span class="ic">ℹ</span><span>以下全部为<b>描述性统计</b>：口径基于演示数据集内的记录，「有记录的选手数」≠ 真实参赛规模。每个标签页附统计口径说明。</span></div>' +
+      '<div class="tabs" id="an-tabs">' + tabs.map(function (t) {
+        return '<button data-act="tab" data-v="' + t[0] + '"' + (s.tab === t[0] ? ' class="on"' : '') + '>' + t[1] + '</button>';
+      }).join('') + '</div>' +
+      '<div id="analysis-body"></div>' +
+      '</div>';
+    renderAnalysisBody();
+  }
+
+  function renderAnalysisBody() {
+    var s = state.analysis;
+    var body = $('#analysis-body');
+    if (s.tab === 'province') body.innerHTML = analysisProvince();
+    else if (s.tab === 'school') body.innerHTML = analysisSchool();
+    else if (s.tab === 'year') body.innerHTML = analysisYear();
+    else body.innerHTML = analysisAward();
+    animateBars(body);
+  }
+
+  function metricToggle() {
+    var s = state.analysis;
+    return '<div class="metric-toggle">' +
+      '<button data-act="metric" data-v="people"' + (s.metric === 'people' ? ' class="on"' : '') + '>选手数</button>' +
+      '<button data-act="metric" data-v="records"' + (s.metric === 'records' ? ' class="on"' : '') + '>记录数</button>' +
+      '</div>';
+  }
+
+  function barRows(items, colorCls) {
+    var max = Math.max.apply(null, items.map(function (i) { return i.value; }).concat([1]));
+    return '<div class="bars">' + items.map(function (it) {
+      return '<div class="bar-row">' +
+        '<span class="lb">' + (it.href ? '<a href="' + it.href + '">' + esc(it.label) + '</a>' : esc(it.label)) + '</span>' +
+        '<span class="bar-track"><i class="bar-fill ' + (colorCls || '') + '" data-w="' + (it.value / max * 100).toFixed(1) + '%"></i></span>' +
+        '<span class="vl">' + it.value + (it.sub ? ' <small>' + esc(it.sub) + '</small>' : '') + '</span>' +
+        '</div>';
+    }).join('') + '</div>';
+  }
+
+  function analysisProvince() {
+    var s = state.analysis;
+    var m = {};
+    DB.records.forEach(function (r) {
+      var e = m[r.province] = m[r.province] || { people: {}, records: 0, schools: {} };
+      e.people[r.personId] = 1; e.records++; e.schools[r.school] = 1;
+    });
+    var items = Object.keys(m).map(function (pv) {
+      return {
+        label: pv,
+        value: s.metric === 'people' ? Object.keys(m[pv].people).length : m[pv].records,
+        sub: s.metric === 'people' ? m[pv].records + ' 条记录' : Object.keys(m[pv].people).length + ' 人',
+        href: '#/players?province=' + encodeURIComponent(pv),
+        _p: Object.keys(m[pv].people).length, _r: m[pv].records, _s: Object.keys(m[pv].schools).length
+      };
+    }).sort(function (a, b) { return b.value - a.value || a.label.localeCompare(b.label, 'zh'); });
+
+    return '<div class="card"><div class="card-title">各省份' + (s.metric === 'people' ? '选手数' : '记录数') + ' <span class="sub">点击省份查看选手列表</span>' + metricToggle() + '</div>' +
+      barRows(items) +
+      '<hr class="sep">' +
+      '<div class="table-wrap" style="max-height:none;box-shadow:none;border:0"><table class="tbl" style="min-width:420px"><thead><tr><th>省份</th><th class="num">选手</th><th class="num">记录</th><th class="num">出现学校</th></tr></thead><tbody>' +
+      items.map(function (it) {
+        return '<tr><td class="nm-cell"><a href="' + it.href + '">' + esc(it.label) + '</a></td><td class="num">' + it._p + '</td><td class="num">' + it._r + '</td><td class="num">' + it._s + '</td></tr>';
+      }).join('') + '</tbody></table></div>' +
+      '</div>' +
+      '<div class="callout info"><span class="ic">ℹ</span><span><b>统计口径：</b>选手数 = 数据集内该省份去重选手数；记录数 = 该省份的参赛记录条数；出现学校 = 记录中学校去重数（含初中）。数据覆盖不完整时，地区间不可直接比较强弱。</span></div>';
+  }
+
+  function analysisSchool() {
+    var s = state.analysis;
+    var m = {};
+    DB.records.forEach(function (r) {
+      var e = m[r.school] = m[r.school] || { people: {}, records: 0, province: r.province };
+      e.people[r.personId] = 1; e.records++;
+    });
+    var items = Object.keys(m).map(function (sc) {
+      return {
+        label: sc,
+        value: s.metric === 'people' ? Object.keys(m[sc].people).length : m[sc].records,
+        sub: m[sc].province,
+        href: '#/players?q=' + encodeURIComponent(sc),
+        _p: Object.keys(m[sc].people).length, _r: m[sc].records
+      };
+    }).sort(function (a, b) { return b.value - a.value || a.label.localeCompare(b.label, 'zh'); });
+    var top = items.slice(0, 15);
+
+    return '<div class="card"><div class="card-title">学校排行 Top 15 <span class="sub">共 ' + items.length + ' 所学校 · 点击跳转选手列表</span>' + metricToggle() + '</div>' +
+      barRows(top) +
+      '</div>' +
+      '<div class="callout info"><span class="ic">ℹ</span><span><b>统计口径：</b>按<b>记录中的当时学校</b>统计（含初中），同一选手升学后会在两所学校分别计数；学校强弱受记录覆盖度影响大，仅供演示。</span></div>';
+  }
+
+  function analysisYear() {
+    var years = DB.meta.counts.years;
+    var types = ['NOI', 'NOIP', 'CSP-S', 'CSP-J'];
+    var counts = {};
+    years.forEach(function (y) { counts[y] = { total: 0 }; types.forEach(function (t) { counts[y][t] = 0; }); });
+    DB.records.forEach(function (r) { if (counts[r.year]) { counts[r.year][r.contestType]++; counts[r.year].total++; } });
+    var max = Math.max.apply(null, years.map(function (y) { return counts[y].total; }));
+    max = Math.ceil(max / 20) * 20;
+
+    /* SVG 堆叠柱状图 */
+    var W = 680, H = 300, L = 42, R = 16, T = 22, B = 40;
+    var bw = 72, plotW = W - L - R, plotH = H - T - B;
+    var gap = (plotW - bw * years.length) / (years.length + 1);
+    var svg = '<svg class="svg-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="按年份的记录数堆叠图">';
+    for (var t2 = 0; t2 <= 4; t2++) {
+      var yv = max / 4 * t2, yy = T + plotH - (yv / max) * plotH;
+      svg += '<line x1="' + L + '" y1="' + yy + '" x2="' + (W - R) + '" y2="' + yy + '" stroke="var(--line)" stroke-width="1"></line>' +
+        '<text x="' + (L - 8) + '" y="' + (yy + 4) + '" text-anchor="end" font-size="11" fill="var(--muted)">' + yv + '</text>';
+    }
+    years.forEach(function (y, i) {
+      var x = L + gap + i * (bw + gap);
+      var acc = 0;
+      types.forEach(function (tp) {
+        var v = counts[y][tp];
+        if (!v) return;
+        var h = (v / max) * plotH;
+        var yTop = T + plotH - acc - h;
+        svg += '<rect x="' + x + '" y="' + yTop + '" width="' + bw + '" height="' + Math.max(h - 1.5, 1) + '" rx="3" fill="' + TYPE_COLOR[tp] + '" opacity="0.9"><title>' + y + ' · ' + tp + '：' + v + ' 条</title></rect>';
+        if (h > 14) svg += '<text x="' + (x + bw / 2) + '" y="' + (yTop + h / 2 + 4) + '" text-anchor="middle" font-size="11" font-weight="600" fill="#fff">' + v + '</text>';
+        acc += h;
+      });
+      svg += '<text x="' + (x + bw / 2) + '" y="' + (T + plotH + 20) + '" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink-2)">' + y + '</text>' +
+        '<text x="' + (x + bw / 2) + '" y="' + (T + plotH + 35) + '" text-anchor="middle" font-size="11" fill="var(--muted)">共 ' + counts[y].total + ' 条</text>';
+    });
+    svg += '</svg>';
+
+    var legend = '<div class="legend">' + types.map(function (tp) {
+      return '<span class="li"><i class="sw" style="background:' + TYPE_COLOR[tp] + '"></i>' + tp + '</span>';
+    }).join('') + '</div>';
+
+    var tbl = '<div class="table-wrap" style="max-height:none;box-shadow:none;border:0;margin-top:6px"><table class="tbl" style="min-width:460px"><thead><tr><th>年份</th>' +
+      types.map(function (tp) { return '<th class="num">' + tp + '</th>'; }).join('') + '<th class="num">合计</th></tr></thead><tbody>' +
+      years.map(function (y) {
+        return '<tr><td class="nm-cell">' + y + '</td>' + types.map(function (tp) { return '<td class="num">' + counts[y][tp] + '</td>'; }).join('') + '<td class="num"><b>' + counts[y].total + '</b></td></tr>';
+      }).join('') + '</tbody></table></div>';
+
+    return '<div class="card"><div class="card-title">每年记录数（按赛事类型堆叠）</div>' + legend + svg + tbl + '</div>' +
+      '<div class="callout info"><span class="ic">ℹ</span><span><b>统计口径：</b>按参赛记录的赛事年份计数。趋势反映的是<b>演示数据集的收录节奏</b>（如 2022 年收录较少），不代表真实参赛规模变化；正式实现中需先评估各年份数据完整度再解读趋势。</span></div>';
+  }
+
+  function analysisAward() {
+    var orderNOI = ['金牌', '银牌', '铜牌'], orderCSP = ['一等奖', '二等奖', '三等奖'];
+    var rows = DB.contests.slice().sort(function (a, b) { return b.year - a.year || a.type.localeCompare(b.type); }).map(function (ct) {
+      var rs = DB.records.filter(function (r) { return r.contestId === ct.id; });
+      var n = rs.length;
+      var cnt = {};
+      rs.forEach(function (r) { cnt[r.award] = (cnt[r.award] || 0) + 1; });
+      var orders = ct.type === 'NOI' ? orderNOI : orderCSP;
+      var segs = orders.map(function (aw) {
+        var v = cnt[aw] || 0;
+        return '<i class="stacked-seg ' + SEG_CLASS[aw] + '" data-w="' + (v / n * 100).toFixed(1) + '%" title="' + esc(ct.name) + ' · ' + aw + '：' + v + ' 人（' + Math.round(v / n * 100) + '%）"></i>';
+      }).join('');
+      return '<div class="stacked-row"><span><a href="#/contest/' + ct.id + '">' + esc(ct.name) + '</a> <span class="muted small">n=' + n + '</span></span>' +
+        '<span class="stacked-track">' + segs + '</span></div>';
+    }).join('');
+    var legend = '<div class="legend">' +
+      ['金牌', '银牌', '铜牌'].map(function (a) { return '<span class="li"><i class="sw ' + SEG_CLASS[a] + '" style="width:11px;height:11px;border-radius:3.5px;display:inline-block"></i>' + a + '</span>'; }).join('') +
+      ['一等奖', '二等奖', '三等奖'].map(function (a) { return '<span class="li"><i class="sw ' + SEG_CLASS[a] + '" style="width:11px;height:11px;border-radius:3.5px;display:inline-block"></i>' + a + '</span>'; }).join('') +
+      '</div>';
+    return '<div class="card"><div class="card-title">各赛事奖项分布</div>' + legend + rows + '</div>' +
+      '<div class="callout warn"><span class="ic">⚠</span><span><b>口径说明：</b>演示数据的奖项按名次比例示意划定（NOI：前 34% 金 / 前 67% 银；其余赛事：前 30% 一等 / 前 62% 二等）。<b>真实奖项由各省划线决定</b>，比例每年不同，正式实现必须以官方公告的获奖字段为准，不可自行推算。</span></div>';
+  }
+
+  /* ---------------- 视图：关于数据 ---------------- */
+  function renderAbout() {
+    var c = DB.meta.counts;
+    var unv = DB.records.filter(function (r) { return !r.verified; });
+    view.innerHTML =
+      '<div class="view">' +
+      '<h1 class="section-title">关于数据</h1>' +
+
+      '<div class="card"><div class="card-title">这是什么</div>' +
+      '<p style="font-size:14.5px">「OI·竞迹」是一个<b>只读的查询 / 分析工具</b>设计演示：把公开的 OI 竞赛记录整理成可搜索、可追溯、可分析的形态。它<b>不做</b>数据录入后台，也不试图取代现有数据库；数据以「来源 + 快照 + 核验状态」的方式组织，参考了 <a href="https://github.com/OIerDb-ng/OIerDb" target="_blank" rel="noopener">OIerDb-ng/OIerDb</a> 的实现方法：<code>data/</code>（原始数据）→ <code>generator/</code>（清洗生成）→ 前端消费。</p>' +
+      '<p class="small muted" style="margin:0">⚠ 本站所有选手、成绩均为<b>虚构示例数据</b>（' + c.people + ' 人 / ' + c.records + ' 条记录），用于展示产品形态；未复制 OIerDb 的数据内容。OIerDb 代码与数据为 AGPL-3.0，正式复用需遵循其协议（保留署名、相同许可证开源修改版、不使用其名称与徽标）。</p></div>' +
+
+      '<div class="card"><div class="card-title">数据流水线（对应仓库结构）</div>' +
+      '<div class="model-diagram">' +
+        '<div class="model-stage"><span class="n">1</span><span class="t"><b>公开来源</b><span>官方名单公告 / 开源数据库 / 社区提交 —— 对应 data/raw.txt、data/school.txt 的角色</span></span></div>' +
+        '<div class="model-arrow">↓</div>' +
+        '<div class="model-stage"><span class="n">2</span><span class="t"><b>生成器（清洗 / 匹配 / 校验）</b><span>解析、去重、同名消歧、按赛事统一排名 —— 对应 generator/main.py 的角色（本演示中为 data.js 的展开逻辑）</span></span></div>' +
+        '<div class="model-arrow">↓</div>' +
+        '<div class="model-stage"><span class="n">3</span><span class="t"><b>结构化数据</b><span>Person / Participation / Contest / School / Source 五类实体，逐条带来源与核验状态</span></span></div>' +
+        '<div class="model-arrow">↓</div>' +
+        '<div class="model-stage"><span class="n">4</span><span class="t"><b>查询前端（只读）</b><span>搜索、赛事结果、时间线、统计图表 —— 对应 apps/frontend 的角色</span></span></div>' +
+      '</div></div>' +
+
+      '<div class="card"><div class="card-title">数据模型</div>' +
+      '<div class="kv-grid">' +
+        '<div class="kv"><b>Person 选手</b><span>稳定 ID（' + esc(DB.people[0].id) + ' 式）、姓名、别名、拼音；<b>姓名不是主键</b></span></div>' +
+        '<div class="kv"><b>Participation 参赛记录</b><span>选手 × 赛事：成绩、名次、省内名次、当时年级 / 学校、核验状态、备注</span></div>' +
+        '<div class="kv"><b>Contest 赛事</b><span>名称、类型、年份、月份、满分、记录数、来源与采集时间</span></div>' +
+        '<div class="kv"><b>School 学校经历</b><span>学校、学段、起止年份；升学不覆盖历史，记录保留「当时学校」</span></div>' +
+        '<div class="kv"><b>Source 来源</b><span>名称、类型、链接、采集时间、说明 —— 每条记录可回溯</span></div>' +
+        '<div class="kv"><b>Review 复核状态</b><span>待核验 / 低置信匹配 / 同名歧义，以醒目标注展示而非隐藏</span></div>' +
+      '</div></div>' +
+
+      '<div class="card"><div class="card-title">数据体检（自动计算）</div>' +
+      '<div class="kv-grid">' +
+        '<div class="kv"><b>' + c.people + ' 位选手</b><span>' + c.provinces + ' 个省份 · ' + c.schools + '+ 所学校</span></div>' +
+        '<div class="kv"><b>' + c.records + ' 条记录</b><span>' + c.contests + ' 场赛事 · 2022–2025</span></div>' +
+        '<div class="kv"><b>' + c.dupNameGroups + ' 组同名</b><span>独立档案，未自动合并</span></div>' +
+        '<div class="kv"><b>' + c.unverified + ' 条待核验</b><span>已在档案与结果页标注</span></div>' +
+      '</div>' +
+      (unv.length ? '<hr class="sep"><div class="small"><b>待核验明细：</b><ul style="margin:6px 0 0;padding-left:20px;color:var(--muted)">' +
+        unv.map(function (r) {
+          var p = DB.peopleById[r.personId];
+          return '<li><a href="#/player/' + p.id + '">' + esc(p.name) + '</a> · ' + esc(contestById(r.contestId).name) + ' — ' + esc(r.note) + '</li>';
+        }).join('') + '</ul></div>' : '') +
+      '</div>' +
+
+      '<div class="card"><div class="card-title">数据来源（Source 表）</div>' +
+      DB.sources.map(function (s) {
+        return '<div class="src-card"><div class="t">' + esc(s.name) + ' <span class="badge type">' + esc(s.type) + '</span>' +
+          (s.url ? '<a class="small" href="' + esc(s.url) + '" target="_blank" rel="noopener">' + esc(s.url.replace(/^https?:\/\//, '')) + '</a>' : '') +
+          '<span class="muted small" style="margin-left:auto">采集于 ' + esc(s.accessed) + '</span></div>' +
+          '<div class="d">' + esc(s.note) + '</div></div>';
+      }).join('') + '</div>' +
+
+      '<div class="card"><div class="card-title">核验与消歧规则</div>' +
+      '<div class="pill-row" style="margin-bottom:10px">' +
+        '<span class="badge ok">✓ 已核验</span><span class="small muted">已对照来源确认</span>' +
+        '<span class="badge warn">⚠ 待核验</span><span class="small muted">来源缺失 / 存在出入 / 低置信匹配，展示但明确标注</span>' +
+        '<span class="badge dup">同名×N</span><span class="small muted">同名选手独立建档，绝不自动合并；合并需人工确认且可撤销</span>' +
+      '</div>' +
+      '<p class="small muted" style="margin:0">原则：<b>自动给候选，人工做决定</b>。错误合并比暂时漏合并更难修复，因此高置信自动通过、中置信人工确认、低置信保持独立并提示。</p></div>' +
+
+      '<div class="card"><div class="card-title">隐私边界</div>' +
+      '<div class="dl-cols"><div><ul class="dl-list yes">' +
+        '<li>仅收录竞赛成绩相关的必要信息</li>' +
+        '<li>姓名、学校、省份、年级、成绩、名次</li>' +
+        '<li>为本人 / 监护人提供纠错与删除通道（设计目标）</li>' +
+      '</ul></div><div><ul class="dl-list no">' +
+        '<li>不推断、不展示性别等个人信息</li>' +
+        '<li>不收录联系方式、住址、证件信息</li>' +
+        '<li>不把推测信息当作事实展示</li>' +
+      '</ul></div></div></div>' +
+
+      '<div class="card"><div class="card-title">从演示到真实数据的路线</div>' +
+      '<ol style="margin:0;padding-left:20px;font-size:14px;color:var(--ink-2)">' +
+        '<li><b>导入器：</b>解析 OIerDb 生成数据 / 官方公告 → 映射到本数据模型（保留原始快照）</li>' +
+        '<li><b>校验器：</b>字段完整性、同名候选、成绩-名次一致性 → 生成导入报告（新增 / 变更 / 无法解析）</li>' +
+        '<li><b>定期更新：</b>按来源采集时间增量更新，版本化数据（如 ' + esc(DB.meta.version) + ' → 下一版）</li>' +
+        '<li><b>纠错闭环：</b>用户提交 → 人工复核队列 → 更新并公示变更日志</li>' +
+      '</ol></div>' +
+
+      '</div>';
+  }
+
+  /* ---------------- 404 ---------------- */
+  function render404(msg) {
+    view.innerHTML = '<div class="view"><div class="empty"><div class="big">🧭</div><b>' + esc(msg || '页面不存在') + '</b>' +
+      '<p class="small"><a href="#/">返回首页</a></p></div></div>';
+  }
+
+  /* ---------------- CSV 导出 ---------------- */
+  function exportCSV(filename, header, rows) {
+    var csv = '\ufeff' + [header].concat(rows).map(function (r) {
+      return r.map(function (v) {
+        v = String(v == null ? '' : v);
+        return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+      }).join(',');
+    }).join('\n');
+    try {
+      var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+      toast('已导出 ' + filename + '（' + rows.length + ' 行）');
+    } catch (e) {
+      toast('当前预览环境限制了下载，请在浏览器中打开页面后重试');
+    }
+  }
+
+  function contestCSVHeader() {
+    return ['总名次', '省内名次', '姓名', '选手ID', '学校', '省份', '年级', '成绩', '满分', '奖项', '核验状态', '备注', '来源', '来源链接', '采集时间', '数据版本'];
+  }
+  function recordToRow(r) {
+    var p = DB.peopleById[r.personId];
+    return [r.rank, r.provinceRank, p.name, p.id, r.school, r.province, r.grade, r.score, r.maxScore, r.award,
+      r.verified ? '已核验' : '待核验', r.note || '', sourceName(r.sourceId), r.sourceUrl, r.accessed, DB.meta.version];
+  }
+
+  /* ---------------- 全局事件 ---------------- */
+  view.addEventListener('click', function (e) {
+    var el = e.target.closest('[data-act]');
+    if (!el) return;
+    var act = el.getAttribute('data-act');
+    if (act === 'more-players') { visible.players += PAGE.players; renderPlayersList();
+    } else if (act === 'more-search') { visible.search += PAGE.search; renderSearchBody();
+    } else if (act === 'more-contest') { var rr = parseHash(); visible.contest += PAGE.contest; renderContestTable(rr.seg[1]);
+    } else if (act === 'sort') {
+      var key = el.getAttribute('data-key');
+      if (state.contest.sortKey === key) state.contest.sortDir *= -1;
+      else { state.contest.sortKey = key; state.contest.sortDir = (key === 'score') ? -1 : 1; }
+      var r = parseHash();
+      setParamsSilently(r.seg, Object.assign({}, r.params, { sort: state.contest.sortKey + (state.contest.sortDir < 0 ? ':desc' : '') }));
+      renderContestTable(r.seg[1]);
+    } else if (act === 'tab') {
+      state.analysis.tab = el.getAttribute('data-v');
+      $all('#an-tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-v') === state.analysis.tab); });
+      setParamsSilently(['analysis'], { tab: state.analysis.tab, metric: state.analysis.metric });
+      renderAnalysisBody();
+    } else if (act === 'metric') {
+      state.analysis.metric = el.getAttribute('data-v');
+      setParamsSilently(['analysis'], { tab: state.analysis.tab, metric: state.analysis.metric });
+      renderAnalysisBody();
+    } else if (act === 'export-contest') {
+      var ct = contestById(el.getAttribute('data-id'));
+      var rows = getContestRows(ct.id);
+      exportCSV(ct.id + '.csv', contestCSVHeader(), rows.map(recordToRow));
+    } else if (act === 'export-person') {
+      var p = DB.peopleById[el.getAttribute('data-id')];
+      exportCSV('oier-' + p.id + '-' + p.name + '.csv', contestCSVHeader(),
+        p.records.slice().sort(function (a, b) { return a.rank - b.rank === 0 ? 0 : a.year - b.year || a.rank - b.rank; }).map(recordToRow));
+    }
+  });
+
+  /* ---------------- 路由分发 ---------------- */
+  function setNav(name) {
+    $all('#mainnav a').forEach(function (a) { a.classList.toggle('active', a.getAttribute('data-nav') === name); });
+  }
+
+  function route() {
+    var h = parseHash();
+    var seg = h.seg, pa = h.params;
+    window.scrollTo({ top: 0 });
+
+    if (!seg.length) {
+      setNav('home');
+      state.search.q = '';
+      return renderHome();
+    }
+    switch (seg[0]) {
+      case 'search':
+        setNav('');
+        state.search.q = pa.q || '';
+        return renderSearch();
+      case 'players':
+        setNav('players');
+        state.players = { q: pa.q || '', province: pa.province || '', grade: pa.grade || '', sort: pa.sort || 'count' };
+        return renderPlayers();
+      case 'player':
+        setNav('players');
+        return renderPlayer(seg[1]);
+      case 'contests':
+        setNav('contests');
+        return renderContests();
+      case 'contest':
+        setNav('contests');
+        var srt = (pa.sort || 'rank').split(':');
+        state.contest = { q: pa.q || '', province: pa.province || '', grade: pa.grade || '', school: pa.school || '', sortKey: srt[0], sortDir: srt[1] === 'desc' ? -1 : 1 };
+        return renderContest(seg[1]);
+      case 'analysis':
+        setNav('analysis');
+        state.analysis = { tab: pa.tab || 'province', metric: pa.metric || 'people' };
+        return renderAnalysis();
+      case 'about':
+        setNav('about');
+        return renderAbout();
+      default:
+        setNav('');
+        return render404('页面不存在：' + seg.join('/'));
+    }
+  }
+
+  /* ---------------- 主题 ---------------- */
+  function initTheme() {
+    var saved = null;
+    try { saved = localStorage.getItem('oijing-theme'); } catch (e) { }
+    if (!saved) saved = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', saved);
+    $('#theme-toggle').addEventListener('click', function () {
+      var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem('oijing-theme', next); } catch (e) { }
+    });
+  }
+
+  /* ---------------- 启动 ---------------- */
+  function init() {
+    initTheme();
+    $('#ver-chip').textContent = DB.meta.version;
+    $('#footer-meta').innerHTML =
+      '<span><b>数据版本</b> ' + esc(DB.meta.version) + '</span>' +
+      '<span><b>生成时间</b> ' + esc(DB.meta.generatedAt) + '</span>' +
+      '<span><b>规模</b> ' + DB.meta.counts.people + ' 选手 · ' + DB.meta.counts.records + ' 记录 · ' + DB.meta.counts.contests + ' 赛事</span>' +
+      '<span><b>流水线</b> 原始记录 → 生成器 → 结构化数据 → 前端</span>';
+    window.addEventListener('hashchange', route);
+    route();
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
