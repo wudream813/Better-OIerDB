@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>嵌入示例 · OI·竞迹 选手卡片</title>
+<link rel="stylesheet" href="assets/styles.css">
+<style>
+  .demo-wrap { max-width: 760px; margin: 0 auto; padding: 32px 20px 60px; }
+  .demo-wrap h1 { font-size: 24px; }
+  .demo-block {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 18px; margin-bottom: 18px; box-shadow: var(--shadow-sm);
+  }
+  .demo-block h2 { font-size: 14px; margin: 0 0 4px; }
+  .demo-block p { font-size: 12.5px; color: var(--muted); margin: 0 0 14px; }
+  .demo-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 18px; }
+  .demo-person { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+  .demo-person input {
+    padding: 7px 12px; border-radius: 9px; border: 1px solid var(--line-strong);
+    background: var(--surface-2); color: var(--ink); font-family: var(--mono); font-size: 12.5px; width: 130px;
+  }
+  #demo-theme { white-space: nowrap; }
+  .demo-wrap code { font-family: var(--mono); font-size: 11.5px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="./">
+      <span class="brand-logo" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="28" height="28"><rect width="32" height="32" rx="9" fill="#4f46e5"></rect>
+        <path d="M8 21 L13 14 L17 18 L24 9" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"></path>
+        <circle cx="24" cy="9" r="2.2" fill="#fbbf24"></circle></svg>
+      </span>
+      <span class="brand-text"><b>OI·竞迹</b><small>选手卡片嵌入示例</small></span>
+    </a>
+    <nav class="mainnav" style="margin-left:auto"><a href="./">返回站点</a></nav>
+    <button class="theme-toggle" id="demo-theme" type="button" title="切换深浅色">切换主题</button>
+  </div>
+</header>
+
+<div class="demo-wrap">
+  <h1>把选手卡片嵌到任何页面</h1>
+  <p class="small muted">这是一个最小示例页：两段 iframe 代码 + 一个 <code>embed.js</code>，卡片就会自动撑开高度并跟随本页的深浅色主题。</p>
+
+  <div class="demo-bar">
+    <span class="demo-person">选手 ID <input id="demo-id" value="25295" inputmode="numeric"></span>
+    <button class="btn" id="demo-apply" type="button">套用 ID</button>
+  </div>
+
+  <div class="demo-block">
+    <h2>标准卡片</h2>
+    <p>宽度随容器，最大 380px；包含最佳成绩、参赛记录、活跃年份与年级。</p>
+    <iframe id="f-card" src="card.html?id=25295" width="100%" height="220" data-oijing-card scrolling="no"
+            loading="lazy" style="border:0;max-width:380px"></iframe>
+  </div>
+
+  <div class="demo-block">
+    <h2>迷你条</h2>
+    <p>一行高，适合列表、侧边栏或文末署名。</p>
+    <iframe id="f-mini" src="card.html?id=25295&variant=mini" width="100%" height="68" data-oijing-card scrolling="no"
+            loading="lazy" style="border:0;max-width:560px"></iframe>
+  </div>
+
+  <div class="demo-block">
+    <h2>使用的代码</h2>
+    <p>复制到自己的页面即可；<code>assets/embed.js</code> 只需引入一次。</p>
+    <pre id="demo-code" style="margin:0;padding:12px;overflow:auto;background:var(--bg-soft);border:1px solid var(--line);border-radius:10px;font-family:var(--mono);font-size:11.5px;line-height:1.7;color:var(--ink-2);white-space:pre-wrap;word-break:break-all"></pre>
+  </div>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  var base = location.href.replace(/[^/]*$/, '');
+  function render() {
+    var id = (document.getElementById('demo-id').value || '').trim() || '25295';
+    document.getElementById('f-card').src = 'card.html?id=' + encodeURIComponent(id);
+    document.getElementById('f-mini').src = 'card.html?id=' + encodeURIComponent(id) + '&variant=mini';
+    document.getElementById('demo-code').textContent =
+      '<iframe src="' + base + 'card.html?id=' + id + '" width="100%" height="220"\n' +
+      '        style="border:0;max-width:380px" data-oijing-card scrolling="no" loading="lazy"></iframe>\n' +
+      '<script async src="' + base + 'assets/embed.js"><\/script>';
+  }
+  document.getElementById('demo-apply').addEventListener('click', render);
+  document.getElementById('demo-theme').addEventListener('click', function () {
+    var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    Array.prototype.forEach.call(document.querySelectorAll('iframe'), function (f) {
+      try { f.contentWindow.postMessage({ type: 'oijing-card-theme', theme: next }, '*'); } catch (e) {}
+    });
+  });
+  var saved = null;
+  try { saved = localStorage.getItem('oijing-theme'); } catch (e) {}
+  document.documentElement.setAttribute('data-theme', saved || 'light');
+  render();
+})();
+</script>
+<script async src="assets/embed.js"></script>
+</body>
+</html>

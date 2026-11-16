@@ -40,6 +40,201 @@
     return '<a href="#/player/' + p.id + '"' + (extra || '') + '>' + esc(p.name) + '</a>';
   }
 
+  /* ---------------- 可嵌入选手卡片 ---------------- */
+  /* 卡片是独立的静态页 card.html，可被任意页面用 iframe 引用；
+     这里负责生成地址、iframe 代码，以及档案页的预览弹窗。 */
+  var EMBED_HEIGHT = { card: 220, mini: 68 };
+  var EMBED_MAXW = { card: 380, mini: 560 };
+
+  function siteBaseUrl() {
+    return location.origin + location.pathname.replace(/[^/]*$/, '');
+  }
+  function currentSiteTheme() {
+    return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  }
+  function cardUrl(p, opt, previewTheme) {
+    var q = ['id=' + encodeURIComponent(p.id)];
+    if (opt.variant !== 'card') q.push('variant=' + opt.variant);
+    if (opt.theme !== 'auto') q.push('theme=' + opt.theme);
+    else if (previewTheme) q.push('theme=' + previewTheme);
+    if (!opt.link) q.push('link=0');
+    return siteBaseUrl() + 'card.html?' + q.join('&');
+  }
+  function embedSnippet(p, opt) {
+    var attrs = [
+      'src="' + cardUrl(p, opt) + '"',
+      'width="100%"',
+      'height="' + EMBED_HEIGHT[opt.variant] + '"',
+      'title="' + p.name + ' · OI·竞迹 选手卡片"',
+      'style="border:0;max-width:' + EMBED_MAXW[opt.variant] + 'px;min-width:260px"',
+      'loading="lazy"',
+      'scrolling="no"'
+    ];
+    if (opt.auto) attrs.push('data-oijing-card');
+    var code = '<iframe ' + attrs.join(' ') + '></iframe>';
+    if (opt.auto) code += '\n<script async src="' + siteBaseUrl() + 'assets/embed.js"></script>';
+    return code;
+  }
+  function copyText(text, okMsg) {
+    function fallback() {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;top:-1000px;left:0;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      ta.remove();
+      toast(ok ? (okMsg || '已复制') : '复制失败：请手动选中代码复制');
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { toast(okMsg || '已复制'); }, fallback);
+    } else fallback();
+  }
+
+  function openEmbedModal(p) {
+    closeEmbedModal();
+    var opt = { variant: 'card', theme: 'auto', link: true, auto: true };
+    var lastFocus = document.activeElement;
+
+    var wrap = document.createElement('div');
+    wrap.className = 'modal-backdrop';
+    wrap.setAttribute('data-embed-modal', '');
+    wrap.innerHTML =
+      '<div class="modal" role="dialog" aria-modal="true" aria-labelledby="embed-title">' +
+        '<div class="modal-head">' +
+          '<div>' +
+            '<h3 id="embed-title">嵌入选手卡片</h3>' +
+            '<p class="small muted">把 <b>' + esc(p.name) + '</b> 的竞赛成绩卡片放进个人主页、博客、文档或简历。</p>' +
+          '</div>' +
+          '<button class="modal-close" data-act="close-embed" type="button" aria-label="关闭">×</button>' +
+        '</div>' +
+        '<div class="modal-body">' +
+          '<div class="embed-stage">' +
+            '<div class="embed-stage-head"><span>实时预览</span><span id="embed-size-note"></span></div>' +
+            '<div class="embed-preview" id="embed-preview"></div>' +
+          '</div>' +
+          '<div class="embed-controls">' +
+            '<div class="embed-field"><label>样式</label>' +
+              '<div class="seg" data-group="variant">' +
+                '<button type="button" data-v="card" class="on">标准卡片</button>' +
+                '<button type="button" data-v="mini">迷你条</button>' +
+              '</div>' +
+            '</div>' +
+            '<div class="embed-field"><label>主题</label>' +
+              '<div class="seg" data-group="theme">' +
+                '<button type="button" data-v="auto" class="on">跟随系统</button>' +
+                '<button type="button" data-v="light">浅色</button>' +
+                '<button type="button" data-v="dark">深色</button>' +
+              '</div>' +
+            '</div>' +
+            '<div class="embed-field"><label>选项</label>' +
+              '<span style="display:flex;gap:16px;flex-wrap:wrap;padding:5px 0">' +
+                '<label class="embed-check"><input type="checkbox" id="embed-link" checked> 点击卡片跳转档案</label>' +
+                '<label class="embed-check"><input type="checkbox" id="embed-auto" checked> 自动高度</label>' +
+              '</span>' +
+            '</div>' +
+          '</div>' +
+          '<div class="embed-code">' +
+            '<div class="embed-code-head"><span>iframe 代码</span></div>' +
+            '<pre id="embed-code"></pre>' +
+          '</div>' +
+          '<div class="modal-foot">' +
+            '<button class="btn primary" data-act="copy-code" type="button">复制代码</button>' +
+            '<button class="btn" data-act="copy-url" type="button">复制卡片链接</button>' +
+            '<button class="btn" data-act="open-card" type="button">新标签页打开卡片</button>' +
+            '<span class="hint">卡片数据实时来自 OIerDb-ng 公开数据，无需在本站做任何配置。</span>' +
+          '</div>' +
+          '<div class="modal-note">' +
+            '支持 Markdown 的编辑器若禁止 iframe，可改用「复制卡片链接」插入文字链接。' +
+            '卡片只展示公开竞赛信息（姓名 / 学校 / 省份 / 年级 / 成绩），数据版本与站内一致；' +
+            '请在转载时保留「OI·竞迹 · OIerDb-ng」署名，并遵循上游 AGPL-3.0 许可。' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+
+    document.body.appendChild(wrap);
+    document.body.style.overflow = 'hidden';
+
+    var preview = $('#embed-preview', wrap);
+    var codeEl = $('#embed-code', wrap);
+    var noteEl = $('#embed-size-note', wrap);
+
+    function syncPreview() {
+      var src = cardUrl(p, opt, currentSiteTheme());
+      var frame = $('iframe', preview);
+      if (!frame) {
+        frame = document.createElement('iframe');
+        frame.setAttribute('title', p.name + ' 卡片预览');
+        frame.setAttribute('scrolling', 'no');
+        preview.appendChild(frame);
+      }
+      if (frame.getAttribute('src') !== src) frame.setAttribute('src', src);
+      frame.style.height = EMBED_HEIGHT[opt.variant] + 'px';
+      preview.classList.toggle('is-mini', opt.variant === 'mini');
+      codeEl.textContent = embedSnippet(p, opt);
+      noteEl.textContent = (opt.variant === 'mini' ? '迷你条' : '标准卡片') + ' · 宽 100% / 最大 ' + EMBED_MAXW[opt.variant] + 'px';
+    }
+
+    function onMessage(e) {
+      var d = e.data || {};
+      var frame = $('iframe', preview);
+      if (!frame || d.type !== 'oijing-card-height' || e.source !== frame.contentWindow) return;
+      if (!opt.auto) return;
+      var h = Math.max(40, Math.round(d.height));
+      frame.style.height = h + 'px';
+      noteEl.textContent = (opt.variant === 'mini' ? '迷你条' : '标准卡片') + ' · 实测高度 ' + h + 'px';
+    }
+    window.addEventListener('message', onMessage);
+
+    function onKey(e) { if (e.key === 'Escape') closeEmbedModal(); }
+    document.addEventListener('keydown', onKey);
+
+    wrap._cleanup = function () {
+      window.removeEventListener('message', onMessage);
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = '';
+      if (lastFocus && lastFocus.focus) lastFocus.focus();
+    };
+
+    wrap.addEventListener('click', function (e) {
+      var actEl = e.target.closest('[data-act]');
+      var act = actEl && actEl.getAttribute('data-act');
+      if (e.target === wrap || act === 'close-embed') return closeEmbedModal();
+      if (act === 'copy-code') return copyText(embedSnippet(p, opt), '已复制 iframe 代码');
+      if (act === 'copy-url') return copyText(cardUrl(p, opt), '已复制卡片链接');
+      if (act === 'open-card') {
+        window.open(cardUrl(p, opt, currentSiteTheme()), '_blank', 'noopener');
+        return;
+      }
+      var segBtn = e.target.closest('.seg button');
+      if (segBtn) {
+        var group = segBtn.parentNode.getAttribute('data-group');
+        opt[group] = segBtn.getAttribute('data-v');
+        $all('button', segBtn.parentNode).forEach(function (b) { b.classList.toggle('on', b === segBtn); });
+        syncPreview();
+      }
+    });
+
+    var linkBox = $('#embed-link', wrap);
+    var autoBox = $('#embed-auto', wrap);
+    linkBox.addEventListener('change', function () { opt.link = linkBox.checked; syncPreview(); });
+    autoBox.addEventListener('change', function () { opt.auto = autoBox.checked; syncPreview(); });
+
+    syncPreview();
+    var closeBtn = $('.modal-close', wrap);
+    if (closeBtn) closeBtn.focus();
+    wrap._p = p;
+  }
+
+  function closeEmbedModal() {
+    var wrap = $('[data-embed-modal]');
+    if (!wrap) return;
+    if (wrap._cleanup) wrap._cleanup();
+    wrap.remove();
+  }
+
   function toast(msg) {
     var t = $('#toast');
     t.textContent = msg;
@@ -537,11 +732,16 @@
             (p.bestAward ? '<span class="muted small">最佳：' + esc(p.bestAward) + '（' + esc(contestById(p.bestContestId).name) + ' 第 ' + p.bestRank + ' 名）</span>' : '') +
           '</div>' +
         '</div>' +
-        '<div class="profile-stats">' +
-          '<div class="pstat"><div class="v">' + p.count + '</div><div class="k">参赛记录</div></div>' +
-          '<div class="pstat"><div class="v">' + (p.bestRank != null ? p.bestRank : '—') + '</div><div class="k">最佳名次<small>（数据集内）</small></div></div>' +
-          '<div class="pstat"><div class="v">' + new Set(p.records.map(function (r) { return r.contestId; })).size + '</div><div class="k">覆盖赛事</div></div>' +
-          '<div class="pstat"><div class="v">' + new Set(p.records.map(function (r) { return r.year; })).size + '</div><div class="k">活跃年份</div></div>' +
+        '<div class="profile-side">' +
+          '<div class="profile-stats">' +
+            '<div class="pstat"><div class="v">' + p.count + '</div><div class="k">参赛记录</div></div>' +
+            '<div class="pstat"><div class="v">' + (p.bestRank != null ? p.bestRank : '—') + '</div><div class="k">最佳名次<small>（数据集内）</small></div></div>' +
+            '<div class="pstat"><div class="v">' + new Set(p.records.map(function (r) { return r.contestId; })).size + '</div><div class="k">覆盖赛事</div></div>' +
+            '<div class="pstat"><div class="v">' + new Set(p.records.map(function (r) { return r.year; })).size + '</div><div class="k">活跃年份</div></div>' +
+          '</div>' +
+          '<button class="btn embed-btn" type="button" data-act="embed-card" data-id="' + esc(p.id) + '" title="生成可嵌入其他网站的选手卡片">' +
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="12" height="12" rx="2"></rect><path d="M9 21h10a2 2 0 0 0 2-2V9"></path></svg>嵌入卡片' +
+          '</button>' +
         '</div>' +
       '</div>' +
 
@@ -951,6 +1151,13 @@
         '<div class="kv"><b>Review 复核状态</b><span>待核验 / 低置信匹配 / 同名歧义，以醒目标注展示而非隐藏</span></div>' +
       '</div></div>' +
 
+      '<div class="card"><div class="card-title">可嵌入选手卡片 <span class="sub">Embed</span></div>' +
+      '<p class="small" style="margin:0 0 10px">每位选手都有一个独立卡片页 <code>card.html?id=选手ID</code>，可以在个人主页、博客、文档或简历里用 iframe 直接引用；卡片数据与站内数据版本同步，无需自己维护。在任意选手档案页右上角点「嵌入卡片」即可实时预览、选择样式与主题并复制代码。</p>' +
+      '<div class="embed-code"><div class="embed-code-head"><span>示例</span></div><pre>' +
+        esc('<iframe src="' + siteBaseUrl() + 'card.html?id=' + esc(DB.people[0].id) + '" width="100%" height="220"\n        style="border:0;max-width:380px" scrolling="no" loading="lazy"></iframe>') +
+      '</pre></div>' +
+      '<p class="small muted" style="margin:9px 0 0">两种样式：标准卡片 / 迷你条；主题可跟随系统或固定浅色、深色。若编辑器禁止 iframe，可改用卡片链接；转载时请保留「OI·竞迹 · OIerDb-ng」署名并遵循上游 AGPL-3.0 许可。</p></div>' +
+
       '<div class="card"><div class="card-title">数据体检（自动计算）</div>' +
       '<div class="kv-grid">' +
         '<div class="kv"><b>' + c.people + ' 位选手</b><span>' + c.provinces + ' 个省份 · ' + c.schools + '+ 所学校</span></div>' +
@@ -1072,6 +1279,9 @@
       var p = DB.peopleById[el.getAttribute('data-id')];
       exportCSV('oier-' + p.id + '-' + p.name + '.csv', contestCSVHeader(),
         p.records.slice().sort(function (a, b) { return a.rank - b.rank === 0 ? 0 : a.year - b.year || a.rank - b.rank; }).map(recordToRow));
+    } else if (act === 'embed-card') {
+      var ep = DB.peopleById[el.getAttribute('data-id')];
+      if (ep) openEmbedModal(ep);
     }
   });
 
@@ -1081,6 +1291,7 @@
   }
 
   function route() {
+    closeEmbedModal();
     var h = parseHash();
     var seg = h.seg, pa = h.params;
     window.scrollTo({ top: 0 });

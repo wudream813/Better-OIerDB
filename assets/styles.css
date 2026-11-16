@@ -626,3 +626,104 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 18px 0; }
 .suggestion:hover, .suggestion:focus { background: var(--primary-soft); outline: none; }
 .suggestion small { color: var(--muted); font-size: 11px; white-space: nowrap; }
 .more-results { display: flex; margin: 16px auto 28px; }
+
+/* ============================================================
+   嵌入选手卡片：档案页按钮 + 弹窗
+   ============================================================ */
+.profile-side { display: flex; flex-direction: column; gap: 10px; align-items: stretch; flex: none; }
+.btn.embed-btn { justify-content: center; }
+.btn.embed-btn .em-ic { font-size: 13px; line-height: 1; }
+
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(16, 24, 40, .52);
+  -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 18px;
+  animation: modal-fade .16s ease;
+}
+@keyframes modal-fade { from { opacity: 0; } to { opacity: 1; } }
+.modal {
+  width: min(820px, 100%); max-height: calc(100vh - 36px); overflow: auto;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: 0 24px 64px rgba(16, 24, 40, .28);
+}
+.modal-head {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 18px 20px 14px; border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; background: var(--surface); z-index: 2;
+}
+.modal-head h3 { margin: 0; font-size: 17px; }
+.modal-head p { margin: 3px 0 0; }
+.modal-close {
+  margin-left: auto; flex: none; width: 32px; height: 32px; cursor: pointer;
+  border-radius: 9px; border: 1px solid var(--line); background: var(--surface-2);
+  color: var(--ink-2); font-size: 18px; line-height: 1; font-family: var(--font);
+}
+.modal-close:hover { border-color: var(--danger); color: var(--danger); }
+.modal-body { padding: 16px 20px 20px; }
+
+.embed-stage {
+  border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+  background:
+    linear-gradient(45deg, color-mix(in srgb, var(--line) 45%, transparent) 25%, transparent 25%, transparent 75%, color-mix(in srgb, var(--line) 45%, transparent) 75%) 0 0/16px 16px,
+    linear-gradient(45deg, color-mix(in srgb, var(--line) 45%, transparent) 25%, transparent 25%, transparent 75%, color-mix(in srgb, var(--line) 45%, transparent) 75%) 8px 8px/16px 16px,
+    var(--surface-2);
+}
+.embed-stage-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 7px 12px; font-size: 11.5px; color: var(--muted);
+  background: var(--surface); border-bottom: 1px solid var(--line);
+  font-weight: 600; letter-spacing: .2px;
+}
+.embed-preview { padding: 16px; display: flex; justify-content: center; min-height: 120px; }
+.embed-preview iframe { border: 0; width: 100%; max-width: 380px; display: block; }
+.embed-preview.is-mini iframe { max-width: 560px; }
+
+.embed-controls { display: flex; flex-wrap: wrap; gap: 14px 22px; margin: 16px 0 4px; }
+.embed-field { display: flex; flex-direction: column; gap: 6px; }
+.embed-field > label { font-size: 11.5px; font-weight: 700; color: var(--muted); letter-spacing: .3px; }
+.seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 10px; overflow: hidden; background: var(--surface-2); }
+.seg button {
+  padding: 6px 13px; font-size: 12.5px; font-weight: 600; font-family: var(--font);
+  border: 0; background: transparent; color: var(--ink-2); cursor: pointer; white-space: nowrap;
+}
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button:hover { color: var(--primary); }
+.seg button.on { background: var(--primary); color: #fff; }
+.embed-check { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
+.embed-check input { accent-color: var(--primary); width: 15px; height: 15px; }
+
+.embed-code { margin-top: 14px; }
+.embed-code-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.embed-code-head span { font-size: 11.5px; font-weight: 700; color: var(--muted); letter-spacing: .3px; }
+.embed-code pre {
+  margin: 0; padding: 12px 13px; overflow: auto; max-height: 168px;
+  background: var(--bg-soft); border: 1px solid var(--line); border-radius: 10px;
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.7; color: var(--ink-2);
+  white-space: pre-wrap; word-break: break-all;
+}
+.modal-foot { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-top: 14px; }
+.modal-foot .hint { font-size: 11.5px; color: var(--muted); flex: 1 1 240px; min-width: 180px; }
+.modal-note {
+  margin-top: 14px; font-size: 11.5px; color: var(--muted); line-height: 1.7;
+  border-top: 1px dashed var(--line); padding-top: 11px;
+}
+.modal-note code {
+  font-family: var(--mono); font-size: 11px; background: var(--surface-2);
+  border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px;
+}
+@media (max-width: 600px) {
+  .modal-backdrop { padding: 0; align-items: flex-end; }
+  .modal { border-radius: 16px 16px 0 0; max-height: 92vh; width: 100%; }
+  .modal-body { padding: 14px; }
+  .embed-preview { padding: 10px; }
+}
+
+/* 行内代码（关于页等） */
+.card p code, .card li code {
+  font-family: var(--mono); font-size: 12px;
+  background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 5px; padding: 1px 5px; color: var(--ink-2);
+}

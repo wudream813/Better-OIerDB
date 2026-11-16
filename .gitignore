@@ -3,3 +3,4 @@
 # OS/editor and local cache files
 .DS_Store
 .cache/
+.local/

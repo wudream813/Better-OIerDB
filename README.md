@@ -29,6 +29,34 @@ python3 -m http.server 8000 --bind 0.0.0.0
 
 仓库包含 `.github/workflows/pages.yml`。推送 `main` / `master` 后会自动部署；在仓库 **Settings → Pages** 中将 Source 设为 **GitHub Actions**。
 
+## 可嵌入选手卡片
+
+每位选手都有一个独立的卡片页，可被任意页面用 iframe 引用：
+
+```
+https://wudream813.github.io/Better-OIerDB/card.html?id=<选手ID>
+```
+
+参数：
+
+| 参数 | 取值 | 说明 |
+| --- | --- | --- |
+| `id` | 选手 ID（必填） | 也可用 `name=` 按姓名精确匹配 |
+| `variant` | `card`（默认）/ `mini` | 标准卡片 / 迷你条 |
+| `theme` | `auto`（默认）/ `light` / `dark` | 主题；`auto` 跟随系统 |
+| `link` | `1`（默认）/ `0` | 点击卡片是否跳转站内档案 |
+
+```html
+<iframe src="https://wudream813.github.io/Better-OIerDB/card.html?id=25295"
+        width="100%" height="220" data-oijing-card scrolling="no" loading="lazy"
+        style="border:0;max-width:380px"></iframe>
+<script async src="https://wudream813.github.io/Better-OIerDB/assets/embed.js"></script>
+```
+
+宿主页面引入 `assets/embed.js` 后，卡片会通过 `postMessage` 回报内容高度自动撑开 iframe，并把宿主页面的深浅色主题透传给卡片（宿主 `<html data-theme="dark">` 时卡片切到深色）。站内选手档案页右上角的「嵌入卡片」可以实时预览、切换样式主题并一键复制代码。
+
+卡片只展示公开竞赛信息（姓名 / 学校 / 省份 / 年级 / 成绩），数据随站内数据版本自动更新；转载时请保留「OI·竞迹 · OIerDb-ng」署名。
+
 ## 数据口径与隐私
 
 - 选手 ID、人员归并、成绩、学校和奖项遵循 OIerDb-ng 的生成数据口径。
