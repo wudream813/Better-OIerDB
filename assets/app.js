@@ -224,9 +224,6 @@
   /* ---------------- 视图：首页 ---------------- */
   function renderHome() {
     var c = DB.meta.counts;
-    var featured = DB.people.slice().sort(function (a, b) {
-      return (DB.awardOrder[b.bestAward] || 0) - (DB.awardOrder[a.bestAward] || 0) || (a.bestRank || 999) - (b.bestRank || 999);
-    }).slice(0, 3);
     var hotContests = DB.contests.slice().sort(function (a, b) { return b.year - a.year || b.month - a.month; }).slice(0, 4);
 
     view.innerHTML =
@@ -255,8 +252,6 @@
         '<div>' +
           '<h2 class="section-title">热门赛事</h2>' +
           '<div class="contest-grid">' + hotContests.map(contestCard).join('') + '</div>' +
-          '<h2 class="section-title">最佳成绩选手 <span class="muted small" style="font-weight:400">（按 OIerDb-ng 记录中的最佳奖项与名次排序）</span></h2>' +
-          '<div class="people-grid">' + featured.map(personCard).join('') + '</div>' +
         '</div>' +
         '<div>' +
           healthCard() +
