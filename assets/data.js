@@ -196,7 +196,7 @@
       url: 'https://github.com/OIerDb-ng/OIerDb', accessed: new Date().toISOString().slice(0, 10),
       note: '由 OIerDb-ng 发布的压缩生成数据导入；记录本身未附逐条官方来源链接。' }];
     return {
-      meta: { version: 'OIerDb ' + resultInfo.sha512.slice(0, 7), generatedAt: new Date().toISOString().slice(0, 10),
+      meta: { version: 'OIerDb ' + resultInfo.sha512.slice(0, 7), staticVersion: staticInfo.sha512.slice(0, 7), generatedAt: new Date().toISOString().slice(0, 10),
         counts: { people: people.length, records: records.length, contests: contests.length,
           provinces: Object.keys(provinceIndex).filter(function (x) { return provinceIndex[x].people; }).length,
           schools: Object.keys(schoolIndex).length, unverified: 0, years: Array.from(new Set(years)).sort(function (a, b) { return a - b; }),

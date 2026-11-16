@@ -24,6 +24,10 @@
     });
   }
   function awardClass(a) { return AWARD_CLASS[a] || 'type'; }
+  function formatCopiedAt(value) {
+    var d = new Date(value);
+    return isNaN(d.getTime()) ? '' : d.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  }
 
   /* ---------------- 主题 ---------------- */
   var mql = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
@@ -135,7 +139,7 @@
           '</div>' +
           '<div class="oc-foot">' +
             '<span class="oc-brand"><i></i>OI·竞迹</span>' +
-            '<span class="oc-src">OIerDb-ng 数据 ' + esc(data.meta.version) + '</span>' +
+            '<span class="oc-src">OIerDb-ng 数据 ' + esc(data.meta.version) + (p.copiedAt ? ' · 复制于 ' + esc(formatCopiedAt(p.copiedAt)) : '') + '</span>' +
             (clickable ? '<span class="oc-go">查看档案 →</span>' : '') +
           '</div>' +
         (clickable ? '</a>' : '</div>');
@@ -143,6 +147,27 @@
 
     watchSize();
     document.documentElement.setAttribute('data-ready', '1');
+  }
+
+  function checkSnapshotFreshness(person, data) {
+    if (!person.copiedAt || !person.id) return;
+    var base = 'https://oier.api.baoshuo.dev/';
+    Promise.all([
+      fetch(base + 'static.info.json', { cache: 'no-store' }).then(function (r) { if (!r.ok) throw new Error('static manifest'); return r.json(); }),
+      fetch(base + 'result.info.json', { cache: 'no-store' }).then(function (r) { if (!r.ok) throw new Error('result manifest'); return r.json(); })
+    ]).then(function (manifests) {
+      var latestResult = 'OIerDb ' + String(manifests[1].sha512 || '').slice(0, 7);
+      var latestStatic = String(manifests[0].sha512 || '').slice(0, 7);
+      var resultChanged = latestResult && latestResult !== data.meta.version;
+      var staticChanged = person.snapshotStaticVersion && latestStatic && latestStatic !== person.snapshotStaticVersion;
+      if (!resultChanged && !staticChanged) return;
+      var notice = document.createElement('div');
+      notice.className = 'oc-stale-notice';
+      notice.setAttribute('role', 'status');
+      notice.textContent = 'OIerDb-ng 数据在此卡片复制后已有更新（当前版本 ' + latestResult + '）。这是旧版快照，请回到档案页重新复制嵌入代码。';
+      root.insertBefore(notice, root.firstChild);
+      watchSize();
+    }).catch(function () { /* 上游清单暂时不可用时，保留卡片，不误报过期 */ });
   }
 
   function pickPerson(data) {
@@ -168,9 +193,10 @@
       firstYear: Number(params.get('first')) || 0, lastYear: Number(params.get('last')) || 0,
       cohort: Number(params.get('cohort')) || 0,
       bestAward: (params.get('award') || '').slice(0, 40),
-      bestRank: Number(params.get('rank')) || null, bestContestId: '' , unverified: 0
+      bestRank: Number(params.get('rank')) || null, bestContestId: '', unverified: 0,
+      copiedAt: (params.get('copiedAt') || '').slice(0, 40), snapshotStaticVersion: (params.get('staticVersion') || '').slice(0, 20)
     };
-    var data = { meta: { version: (params.get('version') || 'snapshot').slice(0, 60) }, contestById: {} };
+    var data = { meta: { version: (params.get('version') || 'snapshot').slice(0, 60), staticVersion: (params.get('staticVersion') || '').slice(0, 20) }, contestById: {} };
     if (contestName) {
       p.bestContestId = 'snapshot-best';
       data.contestById[p.bestContestId] = { id: p.bestContestId, name: contestName, year: contestYear };
@@ -192,6 +218,7 @@
     if (snapshot) {
       document.title = snapshot.person.name + ' · 选手卡片 · OI·竞迹';
       renderCard(snapshot.person, snapshot.data);
+      checkSnapshotFreshness(snapshot.person, snapshot.data);
       return;
     }
     if (!wantId && !wantName) {

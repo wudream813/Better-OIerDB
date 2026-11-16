@@ -192,3 +192,9 @@ body.card-page a { text-decoration: none; color: inherit; }
   .oc-name .oc-py { display: none; }
   .oc-medal-only { display: none; }
 }
+
+.oc-stale-notice {
+  margin: 0 0 8px; padding: 9px 11px; border: 1px solid #f2c078; border-radius: 10px;
+  background: #fffaeb; color: #8a4b08; font-size: 11.5px; line-height: 1.45;
+}
+[data-theme="dark"] .oc-stale-notice { border-color: #6a4b21; background: #2b2013; color: #fdb022; }

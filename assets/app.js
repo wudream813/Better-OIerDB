@@ -52,7 +52,7 @@
   function currentSiteTheme() {
     return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
   }
-  function cardUrl(p, opt, previewTheme) {
+  function cardUrl(p, opt, previewTheme, copiedAt) {
     var contest = p.bestContestId != null ? contestById(p.bestContestId) : null;
     var snapshot = {
       snapshot: '1', id: p.id, name: p.name, py: p.py || p.ini || '',
@@ -60,7 +60,7 @@
       count: p.count || 0, first: p.firstYear || '', last: p.lastYear || '', cohort: p.cohort || '',
       award: p.bestAward || '', rank: p.bestRank || '',
       contest: contest ? contest.name : '', contestYear: contest ? contest.year : '',
-      version: DB.meta.version
+      version: DB.meta.version, staticVersion: DB.meta.staticVersion || '', copiedAt: copiedAt || ''
     };
     var q = Object.keys(snapshot).map(function (key) { return key + '=' + encodeURIComponent(snapshot[key]); });
     if (opt.variant !== 'card') q.push('variant=' + encodeURIComponent(opt.variant));
@@ -69,9 +69,9 @@
     if (!opt.link) q.push('link=0');
     return siteBaseUrl() + 'card.html?' + q.join('&');
   }
-  function embedSnippet(p, opt) {
+  function embedSnippet(p, opt, copiedAt) {
     var attrs = [
-      'src="' + cardUrl(p, opt) + '"',
+      'src="' + cardUrl(p, opt, null, copiedAt) + '"',
       'width="100%"',
       'height="' + EMBED_HEIGHT[opt.variant] + '"',
       'title="' + esc(p.name) + ' · OI·竞迹 选手卡片"',
@@ -153,7 +153,7 @@
             '<button class="btn primary" data-act="copy-code" type="button">复制代码</button>' +
             '<button class="btn" data-act="copy-url" type="button">复制卡片链接</button>' +
             '<button class="btn" data-act="open-card" type="button">新标签页打开卡片</button>' +
-            '<span class="hint">卡片链接包含生成时的公开摘要，不会下载整份数据库；资料更新后重新复制。</span>' +
+            '<span class="hint">复制时会记录时间与数据版本；卡片仅检查上游版本清单（不下载整库），发现更新会提醒重新生成。</span>' +
           '</div>' +
           '<div class="modal-note">' +
             '支持 Markdown 的编辑器若禁止 iframe，可改用「复制卡片链接」插入文字链接。' +
@@ -211,8 +211,8 @@
       var actEl = e.target.closest('[data-act]');
       var act = actEl && actEl.getAttribute('data-act');
       if (e.target === wrap || act === 'close-embed') return closeEmbedModal();
-      if (act === 'copy-code') return copyText(embedSnippet(p, opt), '已复制 iframe 代码');
-      if (act === 'copy-url') return copyText(cardUrl(p, opt), '已复制卡片链接');
+      if (act === 'copy-code') return copyText(embedSnippet(p, opt, new Date().toISOString()), '已复制 iframe 代码（含生成时间）');
+      if (act === 'copy-url') return copyText(cardUrl(p, opt, null, new Date().toISOString()), '已复制卡片链接（含生成时间）');
       if (act === 'open-card') {
         window.open(cardUrl(p, opt, currentSiteTheme()), '_blank', 'noopener');
         return;
