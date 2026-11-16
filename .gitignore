@@ -1,4 +1,5 @@
 # Credentials and local uploads
 /uploads/
-# OS/editor files
+# OS/editor and local cache files
 .DS_Store
+.cache/

@@ -5,7 +5,7 @@
 (function () {
   'use strict';
 
-  var DB = window.OIER_DATA;
+  var DB = null;
   var view = document.getElementById('view');
 
   /* ---------------- 工具函数 ---------------- */
@@ -25,10 +25,12 @@
   function awardBadge(a) { return '<span class="badge ' + (AWARD_CLASS[a] || 'type') + '">' + esc(a) + '</span>'; }
   function typeDot(t) { return '<span class="type-dot ' + esc(t) + '" title="' + esc(t) + '"></span>'; }
   function verifyBadge(r) {
+    if (r.verified === null) return '<span class="badge type" title="数据源未提供逐条官方核验状态">来自 OIerDb</span>';
     return r.verified
       ? '<span class="badge ok" title="已对照来源核验">✓ 已核验</span>'
       : '<span class="badge warn" title="' + esc(r.note || '待人工核验') + '">⚠ 待核验</span>';
   }
+  function scoreLabel(score) { return score == null || !Number.isFinite(Number(score)) ? '—' : String(score); }
   function rankPill(rank) {
     var cls = rank === 1 ? ' r1' : rank === 2 ? ' r2' : rank === 3 ? ' r3' : '';
     return '<span class="rank-pill' + cls + '">' + rank + '</span>';
@@ -110,6 +112,7 @@
     if (!q) return true;
     q = q.trim().toLowerCase();
     if (!q) return true;
+    if (p.searchText != null) return p.searchText.indexOf(q) >= 0 || matchProvince(q, p.province);
     if (p.name.toLowerCase().indexOf(q) >= 0) return true;
     if (p.py.indexOf(q) >= 0) return true;
     if (q.length >= 2 && p.ini.indexOf(q) === 0) return true;
@@ -218,12 +221,12 @@
     var featured = DB.people.slice().sort(function (a, b) {
       return (DB.awardOrder[b.bestAward] || 0) - (DB.awardOrder[a.bestAward] || 0) || (a.bestRank || 999) - (b.bestRank || 999);
     }).slice(0, 3);
-    var hotContests = ['noi-2025', 'csp-s-2025', 'noip-2024', 'csp-j-2025'].map(contestById);
+    var hotContests = DB.contests.slice().sort(function (a, b) { return b.year - a.year || b.month - a.month; }).slice(0, 4);
 
     view.innerHTML =
       '<div class="view">' +
       '<section class="hero">' +
-        '<div class="hero-badge">● 演示数据 ' + esc(DB.meta.version) + ' · 更新于 ' + esc(DB.meta.generatedAt) + '</div>' +
+        '<div class="hero-badge">● OIerDb-ng 数据 ' + esc(DB.meta.version) + ' · 读取于 ' + esc(DB.meta.generatedAt) + '</div>' +
         '<h1>把每一份比赛记录，<br><span class="grad">变成可查询、可追溯的历程</span></h1>' +
         '<p class="sub">面向 OI 公开竞赛记录的查询与分析平台：选手档案 · 赛事结果 · 学校/地区分析 · 历程时间线。数据结构参考 OIerDb 的组织方式，每条记录带来源与核验状态。</p>' +
         '<form class="search-big" id="hero-search">' +
@@ -243,7 +246,7 @@
       '</section>' +
 
       '<div class="stats-strip">' +
-        '<div class="stat"><div class="v">' + c.people + '</div><div class="k">选手（示例）</div></div>' +
+        '<div class="stat"><div class="v">' + c.people + '</div><div class="k">选手记录</div></div>' +
         '<div class="stat"><div class="v">' + c.records + '</div><div class="k">参赛记录</div></div>' +
         '<div class="stat"><div class="v">' + c.contests + '</div><div class="k">覆盖赛事</div></div>' +
         '<div class="stat"><div class="v">' + c.provinces + '</div><div class="k">覆盖省份</div></div>' +
@@ -255,7 +258,7 @@
         '<div>' +
           '<h2 class="section-title">热门赛事</h2>' +
           '<div class="contest-grid">' + hotContests.map(contestCard).join('') + '</div>' +
-          '<h2 class="section-title">焦点选手 <span class="muted small" style="font-weight:400">（按演示数据中的最佳奖项排序）</span></h2>' +
+          '<h2 class="section-title">焦点选手 <span class="muted small" style="font-weight:400">（按 OIerDb 记录中的奖项排序）</span></h2>' +
           '<div class="people-grid">' + featured.map(personCard).join('') + '</div>' +
         '</div>' +
         '<div>' +
@@ -271,7 +274,7 @@
           '</div>' +
           '<div class="card">' +
             '<div class="card-title">统计口径</div>' +
-            '<p class="small muted" style="margin:0">所有统计基于本演示数据集（' + c.records + ' 条记录），按记录去重计数；' +
+            '<p class="small muted" style="margin:0">统计基于 OIerDb-ng 当前发布的数据集（' + c.records + ' 条记录）；' +
             '「有记录的选手数」≠「真实参赛人数」。每个分析图表旁均附口径说明。</p>' +
           '</div>' +
         '</div>' +
@@ -293,10 +296,10 @@
       '<div class="kv-grid" style="grid-template-columns:1fr 1fr">' +
         '<div class="kv"><b>' + c.dupNameGroups + ' 组</b><span>同名选手（需消歧）</span></div>' +
         '<div class="kv"><b>' + c.unverified + ' 条</b><span>待核验记录</span></div>' +
-        '<div class="kv"><b>2022–2025</b><span>覆盖年份</span></div>' +
+        '<div class="kv"><b>' + esc(DB.meta.yearRange || '—') + '</b><span>覆盖年份</span></div>' +
         '<div class="kv"><b>' + c.records + ' 条</b><span>全部带来源标注</span></div>' +
       '</div>' +
-      '<p class="small muted" style="margin:10px 0 0">正式实现中，此处应展示导入报告的完整摘要：新增 / 变更 / 无法解析 / 低置信匹配的数量与明细链接。</p>' +
+      '<p class="small muted" style="margin:10px 0 0">本页统计由当前下载的数据集计算；上游未提供的逐条官方核验和历史变更信息不会在此推断。</p>' +
       '</div>';
   }
 
@@ -372,7 +375,7 @@
     }
     if (!people.length && !contests.length) {
       html = '<div class="empty"><div class="big">🫥</div><b>没有找到「' + esc(q) + '」相关的选手或赛事</b>' +
-        '<p class="small">演示数据集共 ' + DB.meta.counts.people + ' 位选手、' + DB.meta.counts.contests + ' 场赛事。试试「陈子航」「NOI 2025」「雅礼」「lwz」「zhejiang」「hzez」。</p></div>';
+        '<p class="small">当前数据集共 ' + DB.meta.counts.people + ' 个选手档案、' + DB.meta.counts.contests + ' 场赛事。试试姓名、赛事名、学校名或省份拼音。</p></div>';
     }
     body.innerHTML = html;
   }
@@ -486,7 +489,7 @@
             '<span class="sp">' + ct.year + ' 年 ' + ct.month + ' 月</span>' +
           '</div>' +
           '<div class="l2">' +
-            '<span>成绩 <b>' + r.score + '</b> / ' + r.maxScore + '</span>' +
+            '<span>成绩 <b>' + scoreLabel(r.score) + '</b> / ' + r.maxScore + '</span>' +
             '<span>总名次 <b>' + rankPill(r.rank) + '</b> <span class="muted small">（数据集内 ' + r.total + ' 人）</span></span>' +
             '<span>省内名次 <b>' + r.provinceRank + '</b></span>' +
           '</div>' +
@@ -508,7 +511,7 @@
       return '<tr>' +
         '<td>' + typeDot(ct.type) + ' <a href="#/contest/' + ct.id + '">' + esc(ct.name) + '</a></td>' +
         '<td>' + ct.year + '</td><td>' + esc(r.grade) + '</td>' +
-        '<td class="num">' + r.score + ' / ' + r.maxScore + '</td>' +
+        '<td class="num">' + scoreLabel(r.score) + ' / ' + r.maxScore + '</td>' +
         '<td>' + rankPill(r.rank) + '</td><td class="num">' + r.provinceRank + '</td>' +
         '<td>' + awardBadge(r.award) + '</td>' +
         '<td>' + esc(r.school) + '</td>' +
@@ -573,7 +576,7 @@
               '<div class="kv"><b>' + p.unverified + ' 条</b><span>待核验</span></div>' +
               '<div class="kv"><b>' + (dups.length ? dups.length + ' 人' : '无') + '</b><span>同名档案</span></div>' +
             '</div>' +
-            '<p class="small muted" style="margin:10px 0 0">正式实现中：每条记录可展开查看原始快照；发现错误可一键提交更正，进入人工复核队列。</p>' +
+            '<p class="small muted" style="margin:10px 0 0">记录来源为 OIerDb-ng 发布数据；本只读站不提供在线更改，若有疑问请通过上游仓库的 Issue / 讨论反馈。</p>' +
           '</div>' +
           '<div class="card"><div class="card-title">隐私边界</div>' +
           '<p class="small muted" style="margin:0">仅收录与竞赛成绩相关的必要信息：姓名、学校、省份、年级与成绩。不推断性别、不收录联系方式与住址等个人信息。</p></div>' +
@@ -589,16 +592,16 @@
 
   /* ---------------- 视图：赛事列表 ---------------- */
   function renderContests() {
-    var groups = ['NOI', 'NOIP', 'CSP-S', 'CSP-J'];
-    var names = { 'NOI': 'NOI · 全国决赛', 'NOIP': 'NOIP · 全国联赛', 'CSP-S': 'CSP-S · 第二轮（提高组）', 'CSP-J': 'CSP-J · 第二轮（入门组）' };
+    var groups = Array.from(new Set(DB.contests.map(function (c) { return c.type || '其他赛事'; })));
+    groups.sort(function (a, b) { return a.localeCompare(b, 'zh'); });
     var html = groups.map(function (g) {
-      var list = DB.contests.filter(function (c) { return c.type === g; }).sort(function (a, b) { return b.year - a.year; });
-      return '<div><h2 class="section-title">' + typeDot(g) + ' ' + names[g] + '</h2>' +
+      var list = DB.contests.filter(function (c) { return c.type === g; }).sort(function (a, b) { return b.year - a.year || b.month - a.month; });
+      return '<div><h2 class="section-title">' + typeDot(g) + ' ' + esc(g) + '</h2>' +
         '<div class="contest-grid">' + list.map(contestCard).join('') + '</div></div>';
     }).join('');
     view.innerHTML =
       '<div class="view"><h1 class="section-title">赛事结果</h1>' +
-      '<div class="callout info"><span class="ic">ℹ</span><span>每场赛事仅收录演示数据集内的部分记录（非完整名单）；名次与奖项为<b>数据集内示意值</b>，正式实现将逐条对应官方公告。</span></div>' +
+      '<div class="callout info"><span class="ic">ℹ</span><span>以下结果来自 OIerDb-ng 当前发布的数据集。记录覆盖度、字段和名次口径遵循上游数据；请查看原始来源，勿将其误认为官方完整名单。</span></div>' +
       '<div class="contest-groups">' + html + '</div></div>';
   }
 
@@ -640,7 +643,7 @@
           '<span class="badge type">来源：' + esc(sourceName(ct.sourceId)) + ' · 采集于 ' + esc(ct.accessed) + '</span>' +
         '</div>' +
       '</div>' +
-      '<div class="callout warn" style="margin-top:14px"><span class="ic">⚠</span><span><b>口径说明：</b>本表为演示数据，仅收录 ' + ct.recordCount + ' 条示例记录，非官方完整名单；名次为数据集内排名，奖项按名次比例示意划定（真实奖项以各省划线为准）。</span></div>' +
+      '<div class="callout warn" style="margin-top:14px"><span class="ic">⚠</span><span><b>口径说明：</b>本表展示当前 OIerDb-ng 数据集中 ' + ct.recordCount + ' 条记录。数据源未提供逐条官方核验状态；请以原始公告及数据来源说明为准。</span></div>' +
 
       '<div class="toolbar">' +
         '<div class="grow"><input type="search" id="ct-q" placeholder="在结果中搜索姓名 / 学校 / 省份（支持拼音、简称）…" value="' + esc(s.q) + '"></div>' +
@@ -731,7 +734,7 @@
           '<td>' + esc(r.school) + '</td>' +
           '<td><span class="badge prov">' + esc(r.province) + '</span></td>' +
           '<td>' + esc(r.grade) + '</td>' +
-          '<td class="num"><b>' + r.score + '</b> <span class="muted small">/ ' + r.maxScore + '</span></td>' +
+          '<td class="num"><b>' + scoreLabel(r.score) + '</b> <span class="muted small">/ ' + r.maxScore + '</span></td>' +
           '<td>' + awardBadge(r.award) + '</td>' +
           '<td>' + verifyBadge(r) + '</td>' +
           '<td><a class="small" href="' + esc(r.sourceUrl) + '" target="_blank" rel="noopener">' + esc(r.accessed) + '</a></td>' +
@@ -750,7 +753,7 @@
     view.innerHTML =
       '<div class="view">' +
       '<h1 class="section-title">学校 / 地区分析</h1>' +
-      '<div class="callout info"><span class="ic">ℹ</span><span>以下全部为<b>描述性统计</b>：口径基于演示数据集内的记录，「有记录的选手数」≠ 真实参赛规模。每个标签页附统计口径说明。</span></div>' +
+      '<div class="callout info"><span class="ic">ℹ</span><span>以下全部为<b>描述性统计</b>：口径基于当前 OIerDb-ng 数据集中的记录，「有记录的选手数」不等于真实参赛规模。每个标签页附统计口径说明。</span></div>' +
       '<div class="tabs" id="an-tabs">' + tabs.map(function (t) {
         return '<button data-act="tab" data-v="' + t[0] + '"' + (s.tab === t[0] ? ' class="on"' : '') + '>' + t[1] + '</button>';
       }).join('') + '</div>' +
@@ -837,7 +840,7 @@
     return '<div class="card"><div class="card-title">学校排行 Top 15 <span class="sub">共 ' + items.length + ' 所学校 · 点击跳转选手列表</span>' + metricToggle() + '</div>' +
       barRows(top) +
       '</div>' +
-      '<div class="callout info"><span class="ic">ℹ</span><span><b>统计口径：</b>按<b>记录中的当时学校</b>统计（含初中），同一选手升学后会在两所学校分别计数；学校强弱受记录覆盖度影响大，仅供演示。</span></div>';
+      '<div class="callout info"><span class="ic">ℹ</span><span><b>统计口径：</b>按<b>记录中的当时学校</b>统计（含初中），同一选手升学后会在两所学校分别计数；结果受上游记录覆盖度影响，不代表学校教学质量。</span></div>';
   }
 
   function analysisYear() {
@@ -887,7 +890,7 @@
       }).join('') + '</tbody></table></div>';
 
     return '<div class="card"><div class="card-title">每年记录数（按赛事类型堆叠）</div>' + legend + svg + tbl + '</div>' +
-      '<div class="callout info"><span class="ic">ℹ</span><span><b>统计口径：</b>按参赛记录的赛事年份计数。趋势反映的是<b>演示数据集的收录节奏</b>（如 2022 年收录较少），不代表真实参赛规模变化；正式实现中需先评估各年份数据完整度再解读趋势。</span></div>';
+      '<div class="callout info"><span class="ic">ℹ</span><span><b>统计口径：</b>按参赛记录的赛事年份计数。趋势反映的是<b>上游数据集的收录情况</b>，不代表真实参赛规模变化；各年份覆盖度可能不同。</span></div>';
   }
 
   function analysisAward() {
@@ -910,28 +913,28 @@
       ['一等奖', '二等奖', '三等奖'].map(function (a) { return '<span class="li"><i class="sw ' + SEG_CLASS[a] + '" style="width:11px;height:11px;border-radius:3.5px;display:inline-block"></i>' + a + '</span>'; }).join('') +
       '</div>';
     return '<div class="card"><div class="card-title">各赛事奖项分布</div>' + legend + rows + '</div>' +
-      '<div class="callout warn"><span class="ic">⚠</span><span><b>口径说明：</b>演示数据的奖项按名次比例示意划定（NOI：前 34% 金 / 前 67% 银；其余赛事：前 30% 一等 / 前 62% 二等）。<b>真实奖项由各省划线决定</b>，比例每年不同，正式实现必须以官方公告的获奖字段为准，不可自行推算。</span></div>';
+      '<div class="callout warn"><span class="ic">⚠</span><span><b>口径说明：</b>奖项字段来自 OIerDb-ng 数据集，本工具不按名次比例推算奖项。若发现缺漏或冲突，请核对对应官方公告及上游记录。</span></div>';
   }
 
   /* ---------------- 视图：关于数据 ---------------- */
   function renderAbout() {
     var c = DB.meta.counts;
-    var unv = DB.records.filter(function (r) { return !r.verified; });
+    var unv = DB.records.filter(function (r) { return r.verified === false; });
     view.innerHTML =
       '<div class="view">' +
       '<h1 class="section-title">关于数据</h1>' +
 
       '<div class="card"><div class="card-title">这是什么</div>' +
-      '<p style="font-size:14.5px">「OI·竞迹」是一个<b>只读的查询 / 分析工具</b>设计演示：把公开的 OI 竞赛记录整理成可搜索、可追溯、可分析的形态。它<b>不做</b>数据录入后台，也不试图取代现有数据库；数据以「来源 + 快照 + 核验状态」的方式组织，参考了 <a href="https://github.com/OIerDb-ng/OIerDb" target="_blank" rel="noopener">OIerDb-ng/OIerDb</a> 的实现方法：<code>data/</code>（原始数据）→ <code>generator/</code>（清洗生成）→ 前端消费。</p>' +
-      '<p class="small muted" style="margin:0">⚠ 本站所有选手、成绩均为<b>虚构示例数据</b>（' + c.people + ' 人 / ' + c.records + ' 条记录），用于展示产品形态；未复制 OIerDb 的数据内容。OIerDb 代码与数据为 AGPL-3.0，正式复用需遵循其协议（保留署名、相同许可证开源修改版、不使用其名称与徽标）。</p></div>' +
+      '<p style="font-size:14.5px">「OI·竞迹」是一个<b>只读的查询 / 分析工具</b>：直接读取 <a href="https://github.com/OIerDb-ng/OIerDb" target="_blank" rel="noopener">OIerDb-ng/OIerDb</a> 发布的版本化生成数据，并提供额外的检索、档案、时间线和统计视图。此站不是官方 OIerDb，也不代替上游数据维护。</p>' +
+      '<p class="small muted" style="margin:0">当前数据：' + c.people + ' 个选手档案、' + c.records + ' 条参赛记录。上游未提供逐条官方核验状态时，页面只标注数据来自 OIerDb，不声称已对照官方名单。</p></div>' +
 
       '<div class="card"><div class="card-title">数据流水线（对应仓库结构）</div>' +
       '<div class="model-diagram">' +
-        '<div class="model-stage"><span class="n">1</span><span class="t"><b>公开来源</b><span>官方名单公告 / 开源数据库 / 社区提交 —— 对应 data/raw.txt、data/school.txt 的角色</span></span></div>' +
+        '<div class="model-stage"><span class="n">1</span><span class="t"><b>OIerDb-ng 发布数据</b><span>读取上游生成的版本化 static.json 与压缩 result.txt；不直接下载原始 raw.txt</span></span></div>' +
         '<div class="model-arrow">↓</div>' +
-        '<div class="model-stage"><span class="n">2</span><span class="t"><b>生成器（清洗 / 匹配 / 校验）</b><span>解析、去重、同名消歧、按赛事统一排名 —— 对应 generator/main.py 的角色（本演示中为 data.js 的展开逻辑）</span></span></div>' +
+        '<div class="model-stage"><span class="n">2</span><span class="t"><b>上游生成器</b><span>OIerDb-ng 已完成记录解析、人员归并、学校规范化与数据生成；本工具消费其发布结果</span></span></div>' +
         '<div class="model-arrow">↓</div>' +
-        '<div class="model-stage"><span class="n">3</span><span class="t"><b>结构化数据</b><span>Person / Participation / Contest / School / Source 五类实体，逐条带来源与核验状态</span></span></div>' +
+        '<div class="model-stage"><span class="n">3</span><span class="t"><b>查询适配层</b><span>将 OIerDb 压缩记录映射为选手、赛事、学校和参赛记录；未提供的逐条来源状态不做臆测</span></span></div>' +
         '<div class="model-arrow">↓</div>' +
         '<div class="model-stage"><span class="n">4</span><span class="t"><b>查询前端（只读）</b><span>搜索、赛事结果、时间线、统计图表 —— 对应 apps/frontend 的角色</span></span></div>' +
       '</div></div>' +
@@ -949,7 +952,7 @@
       '<div class="card"><div class="card-title">数据体检（自动计算）</div>' +
       '<div class="kv-grid">' +
         '<div class="kv"><b>' + c.people + ' 位选手</b><span>' + c.provinces + ' 个省份 · ' + c.schools + '+ 所学校</span></div>' +
-        '<div class="kv"><b>' + c.records + ' 条记录</b><span>' + c.contests + ' 场赛事 · 2022–2025</span></div>' +
+        '<div class="kv"><b>' + c.records + ' 条记录</b><span>' + c.contests + ' 场赛事 · ' + esc(DB.meta.yearRange || '—') + '</span></div>' +
         '<div class="kv"><b>' + c.dupNameGroups + ' 组同名</b><span>独立档案，未自动合并</span></div>' +
         '<div class="kv"><b>' + c.unverified + ' 条待核验</b><span>已在档案与结果页标注</span></div>' +
       '</div>' +
@@ -987,12 +990,12 @@
         '<li>不把推测信息当作事实展示</li>' +
       '</ul></div></div></div>' +
 
-      '<div class="card"><div class="card-title">从演示到真实数据的路线</div>' +
+      '<div class="card"><div class="card-title">数据更新与边界</div>' +
       '<ol style="margin:0;padding-left:20px;font-size:14px;color:var(--ink-2)">' +
-        '<li><b>导入器：</b>解析 OIerDb 生成数据 / 官方公告 → 映射到本数据模型（保留原始快照）</li>' +
-        '<li><b>校验器：</b>字段完整性、同名候选、成绩-名次一致性 → 生成导入报告（新增 / 变更 / 无法解析）</li>' +
-        '<li><b>定期更新：</b>按来源采集时间增量更新，版本化数据（如 ' + esc(DB.meta.version) + ' → 下一版）</li>' +
-        '<li><b>纠错闭环：</b>用户提交 → 人工复核队列 → 更新并公示变更日志</li>' +
+        '<li><b>版本检查：</b>每次载入先读取上游 SHA-512 清单，再下载对应版本的数据文件。</li>' +
+        '<li><b>来源：</b>数据来自 OIerDb-ng 发布的生成结果；档案 ID、归并和记录内容遵循上游口径。</li>' +
+        '<li><b>本地适配：</b>将成绩、学校、省份与参赛时年级映射为本工具的查询结构；映射规则公开在本仓库。</li>' +
+        '<li><b>注意：</b>当前为只读镜像，不接收更正提交；上游未提供逐条官方来源的记录会明确标为“来自 OIerDb”。</li>' +
       '</ol></div>' +
 
       '</div>';
@@ -1144,6 +1147,18 @@
     route();
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-  else init();
+  function startWithData() {
+    view.innerHTML = '<div class="empty"><div class="big">⏳</div><b>正在载入 OIerDb-ng 数据</b><p class="small">首次载入会下载并解析公开数据，之后可由浏览器缓存加速。</p></div>';
+    Promise.resolve(window.OIER_READY).then(function (data) {
+      DB = data || window.OIER_DATA;
+      init();
+    }).catch(function (error) {
+      console.error('OIerDb data loading failed:', error);
+      view.innerHTML = '<div class="empty"><div class="big">⚠️</div><b>数据载入失败</b><p class="small">无法连接 OIerDb-ng 数据源。请稍后重试，或检查网络访问权限。</p><button class="btn" id="retry-data">重试载入</button></div>';
+      var retry = $('#retry-data');
+      if (retry) retry.addEventListener('click', function () { location.reload(); });
+    });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startWithData);
+  else startWithData();
 })();
