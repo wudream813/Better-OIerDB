@@ -79,7 +79,7 @@
       year: contest.year, month: contest.fall_semester ? 10 : 7,
       grade: grade.name, gradeIndex: grade.index, schoolYear: schoolYear,
       school: school[0], province: prov, score: score,
-      maxScore: contest.full_score || 0, rank: Number(a[3]) || 0,
+      maxScore: contest.full_score || 0, contestType: types[contest.type] || '', rank: Number(a[3]) || 0,
       provinceRank: 0, total: 0, award: award,
       verified: null, note: '', sourceId: 'oierdb', sourceUrl: 'https://github.com/OIerDb-ng/OIerDb',
       accessed: new Date().toISOString().slice(0, 10)
@@ -188,6 +188,8 @@
     });
     records.forEach(function (r) { if (schoolIndex[r.school]) schoolIndex[r.school].records++; });
 
+    var recordsByContest = {};
+    records.forEach(function (r) { (recordsByContest[r.contestId] = recordsByContest[r.contestId] || []).push(r); });
     var years = contests.map(function (c) { return c.year; });
     var current = currentSchoolYear();
     var sources = [{ id: 'oierdb', name: 'OIerDb-ng/OIerDb（生成数据）', type: '开源社区数据库',
@@ -197,11 +199,12 @@
       meta: { version: 'OIerDb ' + resultInfo.sha512.slice(0, 7), generatedAt: new Date().toISOString().slice(0, 10),
         counts: { people: people.length, records: records.length, contests: contests.length,
           provinces: Object.keys(provinceIndex).filter(function (x) { return provinceIndex[x].people; }).length,
-          schools: Object.keys(schoolIndex).length, unverified: 0, dupNameGroups: Object.keys(dupGroups).filter(function (x) { return dupGroups[x].length > 1; }).length },
+          schools: Object.keys(schoolIndex).length, unverified: 0, years: Array.from(new Set(years)).sort(function (a, b) { return a - b; }),
+          dupNameGroups: Object.keys(dupGroups).filter(function (x) { return dupGroups[x].length > 1; }).length },
         yearRange: (Math.min.apply(null, years) || 0) + '–' + (Math.max.apply(null, years) || 0),
         sourceSize: resultInfo.size + staticInfo.size },
       season: current, people: people, peopleById: peopleById, dupGroups: dupGroups,
-      records: records, contests: contests, contestById: contestById,
+      records: records, recordsByContest: recordsByContest, contests: contests, contestById: contestById,
       sources: sources, awardOrder: AWARD_ORDER, provinceIndex: provinceIndex, schoolIndex: schoolIndex
     };
   }

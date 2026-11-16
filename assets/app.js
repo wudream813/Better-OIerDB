@@ -171,11 +171,11 @@
   }
   function gradeOrder(p) { return p.currentGradeIndex == null ? 99 : p.currentGradeIndex; }
 
-  var PROVINCES = (function () {
+  function getProvinces() {
     var m = {};
     DB.people.forEach(function (p) { m[p.province] = 1; });
     return Object.keys(m).sort(function (a, b) { return a.localeCompare(b, 'zh'); });
-  })();
+  }
 
   var GRADES = ['初一', '初二', '初三', '高一', '高二', '高三'];
   function matchGradeFilter(p, g) {
@@ -389,7 +389,7 @@
       '<div class="toolbar">' +
         '<div class="grow"><input type="search" id="pl-q" placeholder="姓名 / 拼音 / 学校 / 省份（支持拼音与简称，如 zhejiang、hzez、雅礼）…" value="' + esc(s.q) + '"></div>' +
         '<select id="pl-prov"><option value="">全部省份</option>' +
-          PROVINCES.map(function (pv) { return '<option value="' + esc(pv) + '"' + (s.province === pv ? ' selected' : '') + '>' + esc(pv) + '</option>'; }).join('') +
+          getProvinces().map(function (pv) { return '<option value="' + esc(pv) + '"' + (s.province === pv ? ' selected' : '') + '>' + esc(pv) + '</option>'; }).join('') +
         '</select>' +
         '<select id="pl-grade" title="按当前年级筛选（' + DB.season + '–' + (DB.season + 1) + ' 学年）"><option value="">全部年级</option>' +
           GRADES.map(function (g) { return '<option value="' + esc(g) + '"' + (s.grade === g ? ' selected' : '') + '>' + esc(g) + '</option>'; }).join('') +
@@ -610,19 +610,20 @@
     var ct = contestById(id);
     if (!ct) return render404('赛事不存在');
     var s = state.contest;
+    var contestRecords = DB.recordsByContest[id] || DB.records.filter(function (r) { return r.contestId === id; });
     var provList = (function () {
       var m = {};
-      DB.records.forEach(function (r) { if (r.contestId === id) m[r.province] = 1; });
+      contestRecords.forEach(function (r) { m[r.province] = 1; });
       return Object.keys(m).sort(function (a, b) { return a.localeCompare(b, 'zh'); });
     })();
     var gradeList = (function () {
       var m = {};
-      DB.records.forEach(function (r) { if (r.contestId === id) m[r.grade] = r.gradeIndex; });
+      contestRecords.forEach(function (r) { m[r.grade] = r.gradeIndex; });
       return Object.keys(m).sort(function (a, b) { return m[a] - m[b]; });
     })();
     var schoolList = (function () {
       var m = {};
-      DB.records.forEach(function (r) { if (r.contestId === id) m[r.school] = 1; });
+      contestRecords.forEach(function (r) { m[r.school] = 1; });
       return Object.keys(m).sort(function (a, b) { return a.localeCompare(b, 'zh'); });
     })();
 
@@ -683,7 +684,7 @@
 
   function getContestRows(id) {
     var s = state.contest;
-    var rows = DB.records.filter(function (r) { return r.contestId === id; });
+    var rows = (DB.recordsByContest[id] || DB.records.filter(function (r) { return r.contestId === id; })).slice();
     if (s.province) rows = rows.filter(function (r) { return r.province === s.province; });
     if (s.grade) rows = rows.filter(function (r) { return r.grade === s.grade; });
     if (s.school) rows = rows.filter(function (r) { return r.school === s.school; });
@@ -844,74 +845,76 @@
   }
 
   function analysisYear() {
-    var years = DB.meta.counts.years;
-    var types = ['NOI', 'NOIP', 'CSP-S', 'CSP-J'];
+    var years = DB.meta.counts.years || [];
+    var types = Array.from(new Set(DB.contests.map(function (c) { return c.type || '其他赛事'; })));
+    var palette = ['#4f46e5','#0e9fdd','#12b76a','#f79009','#d946ef','#ef4444','#14b8a6','#64748b','#a855f7','#84cc16','#f43f5e','#0ea5e9','#ca8a04','#475467'];
     var counts = {};
     years.forEach(function (y) { counts[y] = { total: 0 }; types.forEach(function (t) { counts[y][t] = 0; }); });
-    DB.records.forEach(function (r) { if (counts[r.year]) { counts[r.year][r.contestType]++; counts[r.year].total++; } });
-    var max = Math.max.apply(null, years.map(function (y) { return counts[y].total; }));
-    max = Math.ceil(max / 20) * 20;
+    DB.records.forEach(function (r) { if (counts[r.year]) { counts[r.year][r.contestType] = (counts[r.year][r.contestType] || 0) + 1; counts[r.year].total++; } });
+    var max = Math.max.apply(null, years.map(function (y) { return counts[y].total; }).concat([1]));
+    max = Math.ceil(max / 4) * 4;
 
-    /* SVG 堆叠柱状图 */
-    var W = 680, H = 300, L = 42, R = 16, T = 22, B = 40;
-    var bw = 72, plotW = W - L - R, plotH = H - T - B;
-    var gap = (plotW - bw * years.length) / (years.length + 1);
-    var svg = '<svg class="svg-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="按年份的记录数堆叠图">';
+    var W = 960, H = 320, L = 50, R = 16, T = 22, B = 42;
+    var plotW = W - L - R, plotH = H - T - B;
+    var slot = years.length ? plotW / years.length : plotW;
+    var bw = Math.max(8, Math.min(34, slot * 0.68));
+    var svg = '<svg class="svg-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="按年份和赛事类型的记录数堆叠图">';
     for (var t2 = 0; t2 <= 4; t2++) {
       var yv = max / 4 * t2, yy = T + plotH - (yv / max) * plotH;
       svg += '<line x1="' + L + '" y1="' + yy + '" x2="' + (W - R) + '" y2="' + yy + '" stroke="var(--line)" stroke-width="1"></line>' +
-        '<text x="' + (L - 8) + '" y="' + (yy + 4) + '" text-anchor="end" font-size="11" fill="var(--muted)">' + yv + '</text>';
+        '<text x="' + (L - 8) + '" y="' + (yy + 4) + '" text-anchor="end" font-size="11" fill="var(--muted)">' + Math.round(yv) + '</text>';
     }
     years.forEach(function (y, i) {
-      var x = L + gap + i * (bw + gap);
+      var x = L + i * slot + (slot - bw) / 2;
       var acc = 0;
-      types.forEach(function (tp) {
-        var v = counts[y][tp];
+      types.forEach(function (tp, ti) {
+        var v = counts[y][tp] || 0;
         if (!v) return;
         var h = (v / max) * plotH;
         var yTop = T + plotH - acc - h;
-        svg += '<rect x="' + x + '" y="' + yTop + '" width="' + bw + '" height="' + Math.max(h - 1.5, 1) + '" rx="3" fill="' + TYPE_COLOR[tp] + '" opacity="0.9"><title>' + y + ' · ' + tp + '：' + v + ' 条</title></rect>';
-        if (h > 14) svg += '<text x="' + (x + bw / 2) + '" y="' + (yTop + h / 2 + 4) + '" text-anchor="middle" font-size="11" font-weight="600" fill="#fff">' + v + '</text>';
+        svg += '<rect x="' + x + '" y="' + yTop + '" width="' + bw + '" height="' + Math.max(h - 1, 1) + '" rx="2" fill="' + palette[ti % palette.length] + '" opacity="0.9"><title>' + y + ' · ' + esc(tp) + '：' + v + ' 条</title></rect>';
         acc += h;
       });
-      svg += '<text x="' + (x + bw / 2) + '" y="' + (T + plotH + 20) + '" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink-2)">' + y + '</text>' +
-        '<text x="' + (x + bw / 2) + '" y="' + (T + plotH + 35) + '" text-anchor="middle" font-size="11" fill="var(--muted)">共 ' + counts[y].total + ' 条</text>';
+      svg += '<text x="' + (x + bw / 2) + '" y="' + (T + plotH + 19) + '" text-anchor="middle" font-size="' + (years.length > 16 ? 9 : 11) + '" fill="var(--ink-2)">' + y + '</text>';
     });
     svg += '</svg>';
 
-    var legend = '<div class="legend">' + types.map(function (tp) {
-      return '<span class="li"><i class="sw" style="background:' + TYPE_COLOR[tp] + '"></i>' + tp + '</span>';
+    var legend = '<div class="legend">' + types.map(function (tp, ti) {
+      return '<span class="li"><i class="sw" style="background:' + palette[ti % palette.length] + '"></i>' + esc(tp) + '</span>';
     }).join('') + '</div>';
-
-    var tbl = '<div class="table-wrap" style="max-height:none;box-shadow:none;border:0;margin-top:6px"><table class="tbl" style="min-width:460px"><thead><tr><th>年份</th>' +
-      types.map(function (tp) { return '<th class="num">' + tp + '</th>'; }).join('') + '<th class="num">合计</th></tr></thead><tbody>' +
+    var tbl = '<div class="table-wrap" style="max-height:60vh;box-shadow:none;border:0;margin-top:6px"><table class="tbl" style="min-width:460px"><thead><tr><th>年份</th>' +
+      types.map(function (tp) { return '<th class="num">' + esc(tp) + '</th>'; }).join('') + '<th class="num">合计</th></tr></thead><tbody>' +
       years.map(function (y) {
-        return '<tr><td class="nm-cell">' + y + '</td>' + types.map(function (tp) { return '<td class="num">' + counts[y][tp] + '</td>'; }).join('') + '<td class="num"><b>' + counts[y].total + '</b></td></tr>';
+        return '<tr><td class="nm-cell">' + y + '</td>' + types.map(function (tp) { return '<td class="num">' + (counts[y][tp] || 0) + '</td>'; }).join('') + '<td class="num"><b>' + counts[y].total + '</b></td></tr>';
       }).join('') + '</tbody></table></div>';
-
     return '<div class="card"><div class="card-title">每年记录数（按赛事类型堆叠）</div>' + legend + svg + tbl + '</div>' +
-      '<div class="callout info"><span class="ic">ℹ</span><span><b>统计口径：</b>按参赛记录的赛事年份计数。趋势反映的是<b>上游数据集的收录情况</b>，不代表真实参赛规模变化；各年份覆盖度可能不同。</span></div>';
+      '<div class="callout info"><span class="ic">ℹ</span><span><b>统计口径：</b>按参赛记录赛事年份计数。趋势反映 OIerDb-ng 数据集收录情况，不代表真实参赛规模变化。</span></div>';
   }
 
   function analysisAward() {
-    var orderNOI = ['金牌', '银牌', '铜牌'], orderCSP = ['一等奖', '二等奖', '三等奖'];
+    var palette = ['#d99c24','#98a1ad','#ad6844','#e46b4a','#4786d8','#39a980','#8b5cf6','#14b8a6','#f97316','#64748b','#ec4899','#84cc16'];
+    var allAwards = Array.from(new Set(DB.records.map(function (r) { return r.award; }))).sort(function (a, b) {
+      return (DB.awardOrder[b] || 0) - (DB.awardOrder[a] || 0) || a.localeCompare(b, 'zh');
+    });
+    var countsByContest = {};
+    DB.records.forEach(function (r) {
+      var c = countsByContest[r.contestId] = countsByContest[r.contestId] || {};
+      c[r.award] = (c[r.award] || 0) + 1;
+    });
     var rows = DB.contests.slice().sort(function (a, b) { return b.year - a.year || a.type.localeCompare(b.type); }).map(function (ct) {
-      var rs = DB.records.filter(function (r) { return r.contestId === ct.id; });
-      var n = rs.length;
-      var cnt = {};
-      rs.forEach(function (r) { cnt[r.award] = (cnt[r.award] || 0) + 1; });
-      var orders = ct.type === 'NOI' ? orderNOI : orderCSP;
-      var segs = orders.map(function (aw) {
+      var cnt = countsByContest[ct.id] || {};
+      var n = ct.recordCount || 0;
+      var segs = allAwards.map(function (aw, i) {
         var v = cnt[aw] || 0;
-        return '<i class="stacked-seg ' + SEG_CLASS[aw] + '" data-w="' + (v / n * 100).toFixed(1) + '%" title="' + esc(ct.name) + ' · ' + aw + '：' + v + ' 人（' + Math.round(v / n * 100) + '%）"></i>';
+        if (!v || !n) return '';
+        return '<i class="stacked-seg" data-w="' + (v / n * 100).toFixed(1) + '%" style="background:' + palette[i % palette.length] + '" title="' + esc(ct.name) + ' · ' + esc(aw) + '：' + v + ' 人（' + Math.round(v / n * 100) + '%）"></i>';
       }).join('');
       return '<div class="stacked-row"><span><a href="#/contest/' + ct.id + '">' + esc(ct.name) + '</a> <span class="muted small">n=' + n + '</span></span>' +
         '<span class="stacked-track">' + segs + '</span></div>';
     }).join('');
-    var legend = '<div class="legend">' +
-      ['金牌', '银牌', '铜牌'].map(function (a) { return '<span class="li"><i class="sw ' + SEG_CLASS[a] + '" style="width:11px;height:11px;border-radius:3.5px;display:inline-block"></i>' + a + '</span>'; }).join('') +
-      ['一等奖', '二等奖', '三等奖'].map(function (a) { return '<span class="li"><i class="sw ' + SEG_CLASS[a] + '" style="width:11px;height:11px;border-radius:3.5px;display:inline-block"></i>' + a + '</span>'; }).join('') +
-      '</div>';
+    var legend = '<div class="legend">' + allAwards.map(function (aw, i) {
+      return '<span class="li"><i class="sw" style="width:11px;height:11px;border-radius:3.5px;display:inline-block;background:' + palette[i % palette.length] + '"></i>' + esc(aw) + '</span>';
+    }).join('') + '</div>';
     return '<div class="card"><div class="card-title">各赛事奖项分布</div>' + legend + rows + '</div>' +
       '<div class="callout warn"><span class="ic">⚠</span><span><b>口径说明：</b>奖项字段来自 OIerDb-ng 数据集，本工具不按名次比例推算奖项。若发现缺漏或冲突，请核对对应官方公告及上游记录。</span></div>';
   }
