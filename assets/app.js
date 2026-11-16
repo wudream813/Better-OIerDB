@@ -169,6 +169,12 @@
     input.addEventListener('blur', function () { setTimeout(function () { menu.hidden = true; }, 120); });
     input.addEventListener('focus', update);
   }
+  /* 搜索框的省份 / 学校建议：选中后默认进入对应的选手列表（可通过 onChoose 自定义） */
+  function attachQuickSuggest(input, onChoose) {
+    attachEntitySuggestions(input, onChoose || function (item) {
+      location.hash = buildHash(['players'], item.kind === '省份' ? { province: item.name } : { q: item.name });
+    });
+  }
   function gradeOrder(p) { return p.currentGradeIndex == null ? 99 : p.currentGradeIndex; }
 
   function getProvinces() {
@@ -272,6 +278,7 @@
       '</div>' +
       '</div>';
 
+    attachQuickSuggest($('#hero-q'));
     var form = $('#hero-search');
     form.addEventListener('submit', function (e) {
       e.preventDefault();
@@ -315,6 +322,7 @@
       '<div id="search-body"></div>' +
       '</div>';
     var input = $('#search-q');
+    attachQuickSuggest(input);
     input.addEventListener('input', function () {
       state.search.q = input.value;
       visible.search = PAGE.search;
@@ -412,6 +420,11 @@
     pvEl.addEventListener('change', function () { s.province = pvEl.value; sync(); });
     grEl.addEventListener('change', function () { s.grade = grEl.value; sync(); });
     stEl.addEventListener('change', function () { s.sort = stEl.value; sync(); });
+    attachQuickSuggest(qEl, function (item) {
+      if (item.kind === '省份') { s.province = item.name; s.q = ''; qEl.value = ''; }
+      else { s.q = item.name; qEl.value = item.name; }
+      pvEl.value = s.province; sync();
+    });
     renderPlayersList();
   }
 
