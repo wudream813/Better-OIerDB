@@ -154,34 +154,69 @@
     return null;
   }
 
+  function snapshotData() {
+    if (params.get('snapshot') !== '1') return null;
+    var contestName = (params.get('contest') || '').slice(0, 100);
+    var contestYear = Number(params.get('contestYear')) || 0;
+    var p = {
+      id: wantId || '', name: wantName || (params.get('name') || 'OI 选手').slice(0, 80),
+      py: (params.get('py') || '').slice(0, 40), ini: '',
+      province: (params.get('province') || '').slice(0, 40),
+      currentSchool: (params.get('school') || '').slice(0, 120),
+      currentGrade: (params.get('grade') || '').slice(0, 30),
+      count: Number(params.get('count')) || 0,
+      firstYear: Number(params.get('first')) || 0, lastYear: Number(params.get('last')) || 0,
+      cohort: Number(params.get('cohort')) || 0,
+      bestAward: (params.get('award') || '').slice(0, 40),
+      bestRank: Number(params.get('rank')) || null, bestContestId: '' , unverified: 0
+    };
+    var data = { meta: { version: (params.get('version') || 'snapshot').slice(0, 60) }, contestById: {} };
+    if (contestName) {
+      p.bestContestId = 'snapshot-best';
+      data.contestById[p.bestContestId] = { id: p.bestContestId, name: contestName, year: contestYear };
+    }
+    return { person: p, data: data };
+  }
+
+  function showLoadError(err) {
+    if (err) console.error('card data loading failed:', err);
+    stateBox('<span class="oc-state-ic">⚠️</span><b>数据载入失败</b>' +
+      '<span>无法连接 OIerDb-ng 数据源。</span>' +
+      '<button class="oc-retry" type="button">重试</button>');
+    var btn = root.querySelector('.oc-retry');
+    if (btn) btn.addEventListener('click', function () { location.reload(); });
+  }
+
   function boot() {
-    if (!window.OIER_READY) {
-      stateBox('<span class="oc-state-ic">⚠️</span><b>卡片脚本未就绪</b>');
+    var snapshot = snapshotData();
+    if (snapshot) {
+      document.title = snapshot.person.name + ' · 选手卡片 · OI·竞迹';
+      renderCard(snapshot.person, snapshot.data);
+      return;
+    }
+    if (!wantId && !wantName) {
+      stateBox('<span class="oc-state-ic">🔎</span><b>缺少选手参数</b><span>请从选手档案生成嵌入卡片。</span>');
       return;
     }
     stateBox('<span class="oc-state-ic">⏳</span><b>正在载入选手数据…</b>');
-    Promise.resolve(window.OIER_READY).then(function (data) {
-      if (!wantId && !wantName) {
-        stateBox('<span class="oc-state-ic">🔎</span><b>缺少选手参数</b>' +
-          '<span>请在地址中提供 <code>?id=选手ID</code>。</span>');
-        return;
-      }
-      var p = pickPerson(data);
-      if (!p) {
-        stateBox('<span class="oc-state-ic">🙈</span><b>没有找到该选手</b>' +
-          '<span>数据集中不存在这条记录。</span><a href="' + esc(siteBase()) + '#/players" target="_blank" rel="noopener">去站内搜索 →</a>');
-        return;
-      }
-      document.title = p.name + ' · 选手卡片 · OI·竞迹';
-      renderCard(p, data);
-    }).catch(function (err) {
-      console.error('card data loading failed:', err);
-      stateBox('<span class="oc-state-ic">⚠️</span><b>数据载入失败</b>' +
-        '<span>无法连接 OIerDb-ng 数据源。</span>' +
-        '<button class="oc-retry" type="button">重试</button>');
-      var btn = root.querySelector('.oc-retry');
-      if (btn) btn.addEventListener('click', function () { location.reload(); });
-    });
+    function useLiveData() {
+      Promise.resolve(window.OIER_READY).then(function (data) {
+        var p = pickPerson(data);
+        if (!p) {
+          stateBox('<span class="oc-state-ic">🙈</span><b>没有找到该选手</b>' +
+            '<span>数据集中不存在这条记录。</span><a href="' + esc(siteBase()) + '#/players" target="_blank" rel="noopener">去站内搜索 →</a>');
+          return;
+        }
+        document.title = p.name + ' · 选手卡片 · OI·竞迹';
+        renderCard(p, data);
+      }).catch(showLoadError);
+    }
+    if (window.OIER_READY) return useLiveData();
+    var script = document.createElement('script');
+    script.src = 'assets/data.js';
+    script.onload = useLiveData;
+    script.onerror = showLoadError;
+    document.head.appendChild(script);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);

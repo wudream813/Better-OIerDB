@@ -53,10 +53,19 @@
     return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
   }
   function cardUrl(p, opt, previewTheme) {
-    var q = ['id=' + encodeURIComponent(p.id)];
-    if (opt.variant !== 'card') q.push('variant=' + opt.variant);
-    if (opt.theme !== 'auto') q.push('theme=' + opt.theme);
-    else if (previewTheme) q.push('theme=' + previewTheme);
+    var contest = p.bestContestId != null ? contestById(p.bestContestId) : null;
+    var snapshot = {
+      snapshot: '1', id: p.id, name: p.name, py: p.py || p.ini || '',
+      school: p.currentSchool || '', province: p.province || '', grade: p.currentGrade || '',
+      count: p.count || 0, first: p.firstYear || '', last: p.lastYear || '', cohort: p.cohort || '',
+      award: p.bestAward || '', rank: p.bestRank || '',
+      contest: contest ? contest.name : '', contestYear: contest ? contest.year : '',
+      version: DB.meta.version
+    };
+    var q = Object.keys(snapshot).map(function (key) { return key + '=' + encodeURIComponent(snapshot[key]); });
+    if (opt.variant !== 'card') q.push('variant=' + encodeURIComponent(opt.variant));
+    if (opt.theme !== 'auto') q.push('theme=' + encodeURIComponent(opt.theme));
+    else if (previewTheme) q.push('theme=' + encodeURIComponent(previewTheme));
     if (!opt.link) q.push('link=0');
     return siteBaseUrl() + 'card.html?' + q.join('&');
   }
@@ -65,7 +74,7 @@
       'src="' + cardUrl(p, opt) + '"',
       'width="100%"',
       'height="' + EMBED_HEIGHT[opt.variant] + '"',
-      'title="' + p.name + ' · OI·竞迹 选手卡片"',
+      'title="' + esc(p.name) + ' · OI·竞迹 选手卡片"',
       'style="border:0;max-width:' + EMBED_MAXW[opt.variant] + 'px;min-width:260px"',
       'loading="lazy"',
       'scrolling="no"'
@@ -112,7 +121,7 @@
         '</div>' +
         '<div class="modal-body">' +
           '<div class="embed-stage">' +
-            '<div class="embed-stage-head"><span>实时预览</span><span id="embed-size-note"></span></div>' +
+            '<div class="embed-stage-head"><span>轻量卡片预览</span><span id="embed-size-note"></span></div>' +
             '<div class="embed-preview" id="embed-preview"></div>' +
           '</div>' +
           '<div class="embed-controls">' +
@@ -144,12 +153,12 @@
             '<button class="btn primary" data-act="copy-code" type="button">复制代码</button>' +
             '<button class="btn" data-act="copy-url" type="button">复制卡片链接</button>' +
             '<button class="btn" data-act="open-card" type="button">新标签页打开卡片</button>' +
-            '<span class="hint">卡片数据实时来自 OIerDb-ng 公开数据，无需在本站做任何配置。</span>' +
+            '<span class="hint">卡片链接包含生成时的公开摘要，不会下载整份数据库；资料更新后重新复制。</span>' +
           '</div>' +
           '<div class="modal-note">' +
             '支持 Markdown 的编辑器若禁止 iframe，可改用「复制卡片链接」插入文字链接。' +
             '卡片只展示公开竞赛信息（姓名 / 学校 / 省份 / 年级 / 成绩），数据版本与站内一致；' +
-            '请在转载时保留「OI·竞迹 · OIerDb-ng」署名，并遵循上游 AGPL-3.0 许可。' +
+            '请在转载时保留「OI·竞迹 · OIerDb-ng」署名，并遵循上游 AGPL-3.0 许可。卡片是信息快照，更新后请重新生成。' +
           '</div>' +
         '</div>' +
       '</div>';
