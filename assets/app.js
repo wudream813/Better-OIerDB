@@ -231,18 +231,9 @@
         '<p class="sub">面向 OI 公开竞赛记录的查询与分析平台：选手档案 · 赛事结果 · 学校/地区分析 · 历程时间线。数据结构参考 OIerDb 的组织方式，每条记录带来源与核验状态。</p>' +
         '<form class="search-big" id="hero-search">' +
           '<span class="s-ic"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg></span>' +
-          '<input type="text" id="hero-q" placeholder="搜索选手 / 赛事 / 学校，如：陈子航、NOI 2025、雅礼、czh" autocomplete="off">' +
+          '<input type="text" id="hero-q" placeholder="搜索选手 / 赛事 / 学校 / 省份" autocomplete="off">' +
           '<button type="submit">搜索</button>' +
         '</form>' +
-        '<div class="hero-chips"><span class="lbl">试试：</span>' +
-          '<a class="chip" href="#/search?q=' + encodeURIComponent('NOI 2025') + '">NOI 2025</a>' +
-          '<a class="chip" href="#/search?q=' + encodeURIComponent('陈子航') + '">陈子航（同名演示）</a>' +
-          '<a class="chip" href="#/search?q=' + encodeURIComponent('小舟') + '">别名搜索「小舟」</a>' +
-          '<a class="chip" href="#/search?q=czh">拼音首字母 czh</a>' +
-          '<a class="chip" href="#/search?q=zhejiang">省份拼音 zhejiang</a>' +
-          '<a class="chip" href="#/search?q=hzez">学校简称 hzez</a>' +
-          '<a class="chip" href="#/players?sort=grade">按年级排序</a>' +
-        '</div>' +
       '</section>' +
 
       '<div class="stats-strip">' +
@@ -258,7 +249,7 @@
         '<div>' +
           '<h2 class="section-title">热门赛事</h2>' +
           '<div class="contest-grid">' + hotContests.map(contestCard).join('') + '</div>' +
-          '<h2 class="section-title">焦点选手 <span class="muted small" style="font-weight:400">（按 OIerDb 记录中的奖项排序）</span></h2>' +
+          '<h2 class="section-title">最佳成绩选手 <span class="muted small" style="font-weight:400">（按 OIerDb-ng 记录中的最佳奖项与名次排序）</span></h2>' +
           '<div class="people-grid">' + featured.map(personCard).join('') + '</div>' +
         '</div>' +
         '<div>' +
