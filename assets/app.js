@@ -290,7 +290,7 @@
   var visible = { players: PAGE.players, search: PAGE.search, contest: PAGE.contest };
 
   var state = {
-    players: { q: '', province: '', grade: '', awards: [], contestType: '', year: '', sort: 'source' },
+    players: { q: '', province: '', grade: '', conds: [{ type: '', award: '', year: '' }], sort: 'source' },
     contest: { q: '', province: '', grade: '', school: '', sortKey: 'rank', sortDir: 1 },
     analysis: { tab: 'province', metric: 'people' },
     search: { q: '' }
@@ -579,8 +579,71 @@
   }
 
   /* ---------------- 视图：选手列表 ---------------- */
+  /* 选手查询的条件列表：每一行是一个条件（赛事类型 + 奖项 + 年份，均可留空，至少填一项）。
+     同一行内的各字段须落在同一条参赛记录上；多行之间须同时满足（可来自不同记录）。
+     例：[NOIP · 二等奖] 与 [CSP提高 · 一等奖] = 同时拥有这两类记录的选手。 */
+  var MAX_CONDS = 6;
+  function emptyCond() { return { type: '', award: '', year: '' }; }
+  function condActive(c) { return !!(c.type || c.award || c.year); }
+  function matchConds(p, conds) {
+    return conds.every(function (c) {
+      return p.records.some(function (r) {
+        return (!c.type || r.contestType === c.type) &&
+          (!c.award || r.award === c.award) &&
+          (!c.year || String(r.year) === String(c.year));
+      });
+    });
+  }
+  function describeCond(c) {
+    return esc(c.type || '任意赛事') + ' · ' + esc(c.award || '任意奖项') + ' · ' + (c.year ? esc(c.year) + ' 年' : '任意年份');
+  }
+  function parseConds(pa) {
+    if (pa.conds) {
+      try {
+        var arr = JSON.parse(pa.conds);
+        if (Array.isArray(arr) && arr.length) {
+          return arr.slice(0, MAX_CONDS).map(function (c) {
+            return { type: String(c.type || ''), award: String(c.award || ''), year: String(c.year || '') };
+          });
+        }
+      } catch (e) { /* fall through to legacy parameters */ }
+    }
+    // 旧版链接：awards 为各奖项必须同时满足，type / year 各占一行
+    var legacy = (pa.awards || pa.award || '').split(',').filter(Boolean).map(function (a) { return { type: '', award: a, year: '' }; });
+    if (pa.type) legacy.push({ type: pa.type, award: '', year: '' });
+    if (pa.year) legacy.push({ type: '', award: '', year: String(pa.year) });
+    return legacy.length ? legacy.slice(0, MAX_CONDS) : [emptyCond()];
+  }
+
   function renderPlayers() {
     var s = state.players;
+    var types = Array.from(new Set(DB.contests.map(function (c) { return c.type; }).filter(Boolean))).sort();
+    var years = Array.from(new Set(DB.contests.map(function (c) { return c.year; }))).sort(function (a, b) { return b - a; });
+    var awards = Object.keys(DB.awardOrder).sort(function (a, b) { return (DB.awardOrder[b] || 0) - (DB.awardOrder[a] || 0) || a.localeCompare(b, 'zh'); });
+
+    function condRowsHtml() {
+      var rows = s.conds.map(function (c, i) {
+        var no = i + 1;
+        return '<div class="cond-row" data-i="' + i + '">' +
+          '<span class="cond-no">条件 ' + no + '</span>' +
+          '<select data-f="type" aria-label="条件 ' + no + ' 赛事类型"><option value="">任意赛事类型</option>' +
+            types.map(function (t) { return '<option value="' + esc(t) + '"' + (c.type === t ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('') +
+          '</select>' +
+          '<select data-f="award" aria-label="条件 ' + no + ' 奖项"><option value="">任意奖项</option>' +
+            awards.map(function (a) { return '<option value="' + esc(a) + '"' + (c.award === a ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('') +
+          '</select>' +
+          '<select data-f="year" aria-label="条件 ' + no + ' 比赛年份"><option value="">任意年份</option>' +
+            years.map(function (y) { return '<option value="' + y + '"' + (String(c.year) === String(y) ? ' selected' : '') + '>' + y + ' 年</option>'; }).join('') +
+          '</select>' +
+          (s.conds.length > 1 ? '<button type="button" class="btn" data-remove-cond="' + i + '" aria-label="移除条件 ' + no + '" title="移除此条件">−</button>' : '') +
+          '</div>';
+      }).join('');
+      var addBtn = s.conds.length < MAX_CONDS
+        ? '<button type="button" class="btn cond-add" data-add-cond aria-label="添加一个条件" title="添加一个条件">＋ 添加条件</button>'
+        : '<span class="small muted">最多 ' + MAX_CONDS + ' 个条件</span>';
+      return rows + '<div>' + addBtn + '</div>';
+    }
+
     view.innerHTML =
       '<div class="view">' +
       '<h1 class="section-title">选手查询</h1>' +
@@ -606,64 +669,51 @@
         '</select>' +
         '<span class="count" id="pl-count"></span>' +
       '</div>' +
-      '<div class="toolbar" style="margin-top:-8px">' +
-        '<div id="pl-awards" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap" aria-label="奖项筛选"></div>' +
-        '<select id="pl-type" aria-label="按赛事类型筛选"><option value="">全部赛事类型</option>' +
-          Array.from(new Set(DB.contests.map(function (c) { return c.type; }).filter(Boolean))).sort().map(function (t) { return '<option value="' + esc(t) + '"' + (s.contestType === t ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('') +
-        '</select>' +
-        '<select id="pl-year" aria-label="按比赛年份筛选"><option value="">全部年份</option>' +
-          Array.from(new Set(DB.contests.map(function (c) { return c.year; }))).sort(function (a, b) { return b - a; }).map(function (y) { return '<option value="' + y + '"' + (String(s.year) === String(y) ? ' selected' : '') + '>' + y + ' 年</option>'; }).join('') +
-        '</select>' +
+      '<div class="toolbar cond-toolbar" style="margin-top:-8px">' +
+        '<div class="cond-title small muted">按奖项查找（多个条件须同时满足）</div>' +
+        '<div id="pl-conds" class="cond-list"></div>' +
       '</div>' +
       '<div id="pl-hint"></div>' +
       '<div id="players-list"></div>' +
       '</div>';
 
     function sync() {
-      setParamsSilently(['players'], { q: s.q, province: s.province, grade: s.grade, awards: s.awards.join(','), type: s.contestType, year: s.year, sort: s.sort });
+      var active = s.conds.filter(condActive);
+      setParamsSilently(['players'], { q: s.q, province: s.province, grade: s.grade, conds: active.length ? JSON.stringify(active) : '', sort: s.sort });
       visible.players = PAGE.players;
       renderPlayersList();
     }
     var qEl = $('#pl-q'), pvEl = $('#pl-prov'), stEl = $('#pl-sort'), grEl = $('#pl-grade');
-    var awardBox = $('#pl-awards'), typeEl = $('#pl-type'), yearEl = $('#pl-year');
-    var awardSlots = s.awards.length ? s.awards.slice() : [''];
-    var awardOptions = Object.keys(DB.awardOrder).sort(function (a, b) { return (DB.awardOrder[b] || 0) - (DB.awardOrder[a] || 0) || a.localeCompare(b, 'zh'); });
-    function drawAwardSlots() {
-      awardBox.innerHTML = awardSlots.map(function (value, i) {
-        var usedElsewhere = awardSlots.filter(function (x, j) { return j !== i && x; });
-        return '<span style="display:inline-flex;align-items:center;gap:4px">' +
-          '<select class="pl-award-slot" data-index="' + i + '" aria-label="奖项筛选 ' + (i + 1) + '"><option value="">选择奖项</option>' +
-          awardOptions.filter(function (a) { return !usedElsewhere.includes(a); }).map(function (a) { return '<option value="' + esc(a) + '"' + (value === a ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('') +
-          '</select>' + (i > 0 ? '<button type="button" class="btn" data-remove-award="' + i + '" aria-label="移除此奖项筛选" title="移除此奖项筛选" style="padding:4px 9px">−</button>' : '') +
-          '</span>';
-      }).join('') + '<button type="button" class="btn" data-add-award aria-label="添加奖项筛选" title="添加奖项筛选" style="padding:8px 12px;color:var(--primary);border-color:var(--primary);font-size:13px">＋ 添加奖项</button>';
-    }
-    drawAwardSlots();
+    var condBox = $('#pl-conds');
+    condBox.innerHTML = condRowsHtml();
+
     qEl.addEventListener('input', debounce(function () { s.q = qEl.value; sync(); }, 160));
     pvEl.addEventListener('change', function () { s.province = pvEl.value; sync(); });
     grEl.addEventListener('change', function () { s.grade = grEl.value; sync(); });
     stEl.addEventListener('change', function () { s.sort = stEl.value; sync(); });
-    awardBox.addEventListener('change', function (e) {
-      if (!e.target.classList.contains('pl-award-slot')) return;
-      awardSlots[Number(e.target.getAttribute('data-index'))] = e.target.value;
-      s.awards = awardSlots.filter(Boolean);
-      drawAwardSlots();
+
+    // 行内下拉框改变时只更新状态，不重绘整行，避免丢失焦点
+    condBox.addEventListener('change', function (e) {
+      var sel = e.target.closest('select[data-f]');
+      if (!sel) return;
+      var i = Number(sel.closest('.cond-row').getAttribute('data-i'));
+      s.conds[i][sel.getAttribute('data-f')] = sel.value;
       sync();
     });
-    awardBox.addEventListener('click', function (e) {
-      var add = e.target.closest('[data-add-award]');
-      var remove = e.target.closest('[data-remove-award]');
-      if (add) {
-        if (awardSlots.length < awardOptions.length) { awardSlots.push(''); drawAwardSlots(); }
-      } else if (remove) {
-        awardSlots.splice(Number(remove.getAttribute('data-remove-award')), 1);
-        s.awards = awardSlots.filter(Boolean);
-        if (!awardSlots.length) awardSlots.push('');
-        drawAwardSlots(); sync();
+    condBox.addEventListener('click', function (e) {
+      var add = e.target.closest('[data-add-cond]');
+      var rm = e.target.closest('[data-remove-cond]');
+      if (add && s.conds.length < MAX_CONDS) {
+        s.conds.push(emptyCond());
+        condBox.innerHTML = condRowsHtml();
+      } else if (rm) {
+        s.conds.splice(Number(rm.getAttribute('data-remove-cond')), 1);
+        if (!s.conds.length) s.conds.push(emptyCond());
+        condBox.innerHTML = condRowsHtml();
+        sync();
       }
     });
-    typeEl.addEventListener('change', function () { s.contestType = typeEl.value; sync(); });
-    yearEl.addEventListener('change', function () { s.year = yearEl.value; sync(); });
+
     attachQuickSuggest(qEl, function (item) {
       if (item.kind === '省份') { s.province = item.name; s.q = ''; qEl.value = ''; }
       else { s.q = item.name; qEl.value = item.name; }
@@ -674,22 +724,21 @@
 
   function renderPlayersList() {
     var s = state.players;
+    var active = s.conds.filter(condActive);
     // The unfiltered list can be very large. Keep the default view responsive by
     // showing the source order directly instead of sorting every person on entry.
-    var unfiltered = !s.q && !s.province && !s.grade && !s.awards.length && !s.contestType && !s.year;
+    var unfiltered = !s.q && !s.province && !s.grade && !active.length;
     if (unfiltered && s.sort === 'source') {
       var total = DB.people.length;
       $('#pl-count').textContent = '共 ' + total + ' 位选手';
-      $('#pl-hint').innerHTML = '<div class="small muted" style="margin:0 0 10px">默认按数据源顺序分页显示；可选择奖项、赛事类型、年份等条件筛选，或更改排序方式。</div>';
+      $('#pl-hint').innerHTML = '<div class="small muted" style="margin:0 0 10px">默认按数据源顺序分页显示；可添加奖项条件（如 NOIP 二等奖 与 CSP提高 一等奖），或更改排序方式。</div>';
       $('#players-list').innerHTML = '<div class="people-grid">' + DB.people.slice(0, visible.players).map(personCard).join('') + '</div>' +
         (total > visible.players ? '<button class="btn more-results" data-act="more-players">加载更多选手（已显示 ' + visible.players + ' / ' + total + '）</button>' : '');
       return;
     }
     var list = DB.people.filter(function (p) {
       return (!s.province || p.province === s.province) && matchGradeFilter(p, s.grade) && matchPerson(s.q, p) &&
-        (!s.awards.length || s.awards.every(function (award) { return p.records.some(function (r) { return r.award === award; }); })) &&
-        (!s.contestType || p.records.some(function (r) { return r.contestType === s.contestType; })) &&
-        (!s.year || p.records.some(function (r) { return String(r.year) === String(s.year); }));
+        (!active.length || matchConds(p, active));
     });
     list = sortPeople(list, s.sort);
     $('#pl-count').textContent = '共 ' + list.length + ' 位选手';
@@ -710,8 +759,10 @@
         }).join('') +
         '</div>';
     }
-    if (s.awards.length) {
-      hintHtml += '<div class="small muted" style="margin:0 0 10px">奖项筛选为「同时满足」：选手的记录中须分别包含 ' + s.awards.map(esc).join('、') + '。</div>';
+    if (active.length) {
+      hintHtml += '<div class="small muted" style="margin:0 0 10px">按 ' + active.length + ' 个条件<b>同时</b>筛选：' +
+        active.map(function (c, i) { return '<span class="cond-chip">条件 ' + (s.conds.indexOf(c) + 1) + '：' + describeCond(c) + '</span>'; }).join(' ') +
+        '。每行内的字段须在同一条参赛记录上满足；空白行不参与筛选。</div>';
     }
     if (s.sort === 'grade' || s.sort === 'gradeDesc' || s.grade) {
       hintHtml += '<div class="small muted" style="margin:0 0 10px">年级按 <b>' + DB.season + '–' + (DB.season + 1) + ' 学年</b>推算：以最近一条记录的「当时年级」顺延，届别 = 预计高三毕业年份；7 月 NOI 记入上一学年。</div>';
@@ -1379,7 +1430,7 @@
         return renderSearch();
       case 'players':
         setNav('players');
-        state.players = { q: pa.q || '', province: pa.province || '', grade: pa.grade || '', awards: (pa.awards || pa.award || '').split(',').filter(Boolean), contestType: pa.type || '', year: pa.year || '', sort: pa.sort || 'source' };
+        state.players = { q: pa.q || '', province: pa.province || '', grade: pa.grade || '', conds: parseConds(pa), sort: pa.sort || 'source' };
         return renderPlayers();
       case 'player':
         setNav('players');
