@@ -636,7 +636,7 @@
           awardOptions.filter(function (a) { return !usedElsewhere.includes(a); }).map(function (a) { return '<option value="' + esc(a) + '"' + (value === a ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('') +
           '</select>' + (i > 0 ? '<button type="button" class="btn" data-remove-award="' + i + '" aria-label="移除此奖项筛选" title="移除此奖项筛选" style="padding:4px 9px">−</button>' : '') +
           '</span>';
-      }).join('') + '<button type="button" class="btn" data-add-award aria-label="添加一个奖项筛选" title="添加一个奖项筛选" style="padding:4px 10px;font-size:18px;line-height:1">+</button>';
+      }).join('') + '<button type="button" class="btn" data-add-award aria-label="添加奖项筛选" title="添加奖项筛选" style="padding:8px 12px;color:var(--primary);border-color:var(--primary);font-size:13px">＋ 添加奖项</button>';
     }
     drawAwardSlots();
     qEl.addEventListener('input', debounce(function () { s.q = qEl.value; sync(); }, 160));
