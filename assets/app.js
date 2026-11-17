@@ -290,7 +290,7 @@
   var visible = { players: PAGE.players, search: PAGE.search, contest: PAGE.contest };
 
   var state = {
-    players: { q: '', province: '', grade: '', sort: 'count' },
+    players: { q: '', province: '', grade: '', award: '', contestType: '', year: '', sort: 'count' },
     contest: { q: '', province: '', grade: '', school: '', sortKey: 'rank', sortDir: 1 },
     analysis: { tab: 'province', metric: 'people' },
     search: { q: '' }
@@ -605,20 +605,35 @@
         '</select>' +
         '<span class="count" id="pl-count"></span>' +
       '</div>' +
+      '<div class="toolbar" style="margin-top:-8px">' +
+        '<select id="pl-award" aria-label="按奖项筛选"><option value="">全部奖项</option>' +
+          Array.from(new Set(DB.people.reduce(function (a, p) { return a.concat(p.records.map(function (r) { return r.award; })); }, []).filter(Boolean))).sort(function (a, b) { return (DB.awardOrder[b] || 0) - (DB.awardOrder[a] || 0) || a.localeCompare(b, 'zh'); }).map(function (a) { return '<option value="' + esc(a) + '"' + (s.award === a ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('') +
+        '</select>' +
+        '<select id="pl-type" aria-label="按赛事类型筛选"><option value="">全部赛事类型</option>' +
+          Array.from(new Set(DB.contests.map(function (c) { return c.type; }).filter(Boolean))).sort().map(function (t) { return '<option value="' + esc(t) + '"' + (s.contestType === t ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('') +
+        '</select>' +
+        '<select id="pl-year" aria-label="按比赛年份筛选"><option value="">全部年份</option>' +
+          Array.from(new Set(DB.contests.map(function (c) { return c.year; }))).sort(function (a, b) { return b - a; }).map(function (y) { return '<option value="' + y + '"' + (String(s.year) === String(y) ? ' selected' : '') + '>' + y + ' 年</option>'; }).join('') +
+        '</select>' +
+      '</div>' +
       '<div id="pl-hint"></div>' +
       '<div id="players-list"></div>' +
       '</div>';
 
     function sync() {
-      setParamsSilently(['players'], { q: s.q, province: s.province, grade: s.grade, sort: s.sort });
+      setParamsSilently(['players'], { q: s.q, province: s.province, grade: s.grade, award: s.award, type: s.contestType, year: s.year, sort: s.sort });
       visible.players = PAGE.players;
       renderPlayersList();
     }
     var qEl = $('#pl-q'), pvEl = $('#pl-prov'), stEl = $('#pl-sort'), grEl = $('#pl-grade');
+    var awardEl = $('#pl-award'), typeEl = $('#pl-type'), yearEl = $('#pl-year');
     qEl.addEventListener('input', debounce(function () { s.q = qEl.value; sync(); }, 160));
     pvEl.addEventListener('change', function () { s.province = pvEl.value; sync(); });
     grEl.addEventListener('change', function () { s.grade = grEl.value; sync(); });
     stEl.addEventListener('change', function () { s.sort = stEl.value; sync(); });
+    awardEl.addEventListener('change', function () { s.award = awardEl.value; sync(); });
+    typeEl.addEventListener('change', function () { s.contestType = typeEl.value; sync(); });
+    yearEl.addEventListener('change', function () { s.year = yearEl.value; sync(); });
     attachQuickSuggest(qEl, function (item) {
       if (item.kind === '省份') { s.province = item.name; s.q = ''; qEl.value = ''; }
       else { s.q = item.name; qEl.value = item.name; }
@@ -630,7 +645,10 @@
   function renderPlayersList() {
     var s = state.players;
     var list = DB.people.filter(function (p) {
-      return (!s.province || p.province === s.province) && matchGradeFilter(p, s.grade) && matchPerson(s.q, p);
+      return (!s.province || p.province === s.province) && matchGradeFilter(p, s.grade) && matchPerson(s.q, p) &&
+        (!s.award || p.records.some(function (r) { return r.award === s.award; })) &&
+        (!s.contestType || p.records.some(function (r) { return r.contestType === s.contestType; })) &&
+        (!s.year || p.records.some(function (r) { return String(r.year) === String(s.year); }));
     });
     list = sortPeople(list, s.sort);
     $('#pl-count').textContent = '共 ' + list.length + ' 位选手';
@@ -1317,7 +1335,7 @@
         return renderSearch();
       case 'players':
         setNav('players');
-        state.players = { q: pa.q || '', province: pa.province || '', grade: pa.grade || '', sort: pa.sort || 'count' };
+        state.players = { q: pa.q || '', province: pa.province || '', grade: pa.grade || '', award: pa.award || '', contestType: pa.type || '', year: pa.year || '', sort: pa.sort || 'count' };
         return renderPlayers();
       case 'player':
         setNav('players');
