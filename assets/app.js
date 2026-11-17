@@ -607,7 +607,7 @@
       '</div>' +
       '<div class="toolbar" style="margin-top:-8px">' +
         '<select id="pl-award" aria-label="按奖项筛选"><option value="">全部奖项</option>' +
-          Array.from(new Set(DB.people.reduce(function (a, p) { return a.concat(p.records.map(function (r) { return r.award; })); }, []).filter(Boolean))).sort(function (a, b) { return (DB.awardOrder[b] || 0) - (DB.awardOrder[a] || 0) || a.localeCompare(b, 'zh'); }).map(function (a) { return '<option value="' + esc(a) + '"' + (s.award === a ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('') +
+          Object.keys(DB.awardOrder).sort(function (a, b) { return (DB.awardOrder[b] || 0) - (DB.awardOrder[a] || 0) || a.localeCompare(b, 'zh'); }).map(function (a) { return '<option value="' + esc(a) + '"' + (s.award === a ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('') +
         '</select>' +
         '<select id="pl-type" aria-label="按赛事类型筛选"><option value="">全部赛事类型</option>' +
           Array.from(new Set(DB.contests.map(function (c) { return c.type; }).filter(Boolean))).sort().map(function (t) { return '<option value="' + esc(t) + '"' + (s.contestType === t ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('') +
