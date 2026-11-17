@@ -290,7 +290,7 @@
   var visible = { players: PAGE.players, search: PAGE.search, contest: PAGE.contest };
 
   var state = {
-    players: { q: '', province: '', grade: '', conds: [{ type: '', award: '', year: '' }], sort: 'source' },
+    players: { q: '', province: '', grade: '', conds: [{ type: '', award: '', year: '', score: '' }], sort: 'source' },
     contest: { q: '', province: '', grade: '', school: '', sortKey: 'rank', sortDir: 1 },
     analysis: { tab: 'province', metric: 'people' },
     search: { q: '' }
@@ -604,8 +604,8 @@
     '银牌': '银牌',
     '铜牌': '铜牌'
   };
-  function emptyCond() { return { type: '', award: '', year: '' }; }
-  function condActive(c) { return !!(c.type || c.award || c.year); }
+  function emptyCond() { return { type: '', award: '', year: '', score: '' }; }
+  function condActive(c) { return !!(c.type || c.award || c.year || c.score !== ''); }
   function matchConds(p, conds) {
     return conds.every(function (c) {
       return p.records.some(function (r) {
@@ -621,13 +621,14 @@
         }
         var awardMatch = !c.award || r.award === c.award;
         var yearMatch = !c.year || String(r.year) === String(c.year);
-        return typeMatch && awardMatch && yearMatch;
+        var scoreMatch = c.score === '' || (r.score != null && Number(r.score) === Number(c.score));
+        return typeMatch && awardMatch && yearMatch && scoreMatch;
       });
     });
   }
   function describeCond(c) {
     var typeDesc = (c.type === 'NOIP' || c.type === 'NOIP提高') ? 'NOIP / NOIP提高' : c.type;
-    return esc(typeDesc || '任意赛事') + ' · ' + esc(c.award || '任意奖项') + (c.year ? ' · ' + esc(c.year) + ' 年' : '');
+    return esc(typeDesc || '任意赛事') + ' · ' + esc(c.award || '任意奖项') + (c.year ? ' · ' + esc(c.year) + ' 年' : '') + (c.score !== '' ? ' · ' + esc(c.score) + ' 分' : '');
   }
   function parseConds(pa) {
     if (pa.conds) {
@@ -635,7 +636,7 @@
         var arr = JSON.parse(pa.conds);
         if (Array.isArray(arr) && arr.length) {
           return arr.slice(0, MAX_CONDS).map(function (c) {
-            return { type: String(c.type || ''), award: String(c.award || ''), year: String(c.year || '') };
+            return { type: String(c.type || ''), award: String(c.award || ''), year: String(c.year || ''), score: c.score == null ? '' : String(c.score) };
           });
         }
       } catch (e) { /* fall through to legacy parameters */ }
@@ -678,6 +679,7 @@
           '<select data-f="year" aria-label="条件 ' + no + ' 比赛年份"><option value="">任意年份</option>' +
             years.map(function (y) { return '<option value="' + y + '"' + (String(c.year) === String(y) ? ' selected' : '') + '>' + y + ' 年</option>'; }).join('') +
           '</select>' +
+          '<input type="number" data-f="score" aria-label="条件 ' + no + ' 精确分数" placeholder="精确分数" min="0" step="any" value="' + esc(c.score) + '" inputmode="decimal">' +
           (s.conds.length > 1 ? '<button type="button" class="btn btn-remove-cond" data-remove-cond="' + i + '" aria-label="移除条件 ' + no + '" title="移除此条件">✕ 移除</button>' : '') +
           '</div>';
       }).join('');
@@ -716,7 +718,7 @@
         '<div class="cond-header">' +
           '<div class="cond-title-box">' +
             '<span class="cond-title">🏅 奖项与赛事组合查找（列表模式）</span>' +
-            '<span class="cond-desc">每行对应一项荣誉要求，选手须同时满足所有条件（如：条件 1 选「NOIP 二等奖」，条件 2 选「CSP提高 一等奖」）</span>' +
+            '<span class="cond-desc">每行对应一项要求，可按赛事、奖项、年份及精确分数组合；选手须同时满足所有条件（如：NOIP 二等奖、CSP提高 一等奖）</span>' +
           '</div>' +
           '<div class="cond-actions">' +
             '<button type="button" class="btn cond-add" data-add-cond aria-label="添加一个条件" title="添加一个条件">＋ 添加条件</button>' +
@@ -752,10 +754,10 @@
 
     // 行内下拉框改变时只更新状态，不重绘整行，避免丢失焦点
     condBox.addEventListener('change', function (e) {
-      var sel = e.target.closest('select[data-f]');
-      if (!sel) return;
-      var i = Number(sel.closest('.cond-row').getAttribute('data-i'));
-      s.conds[i][sel.getAttribute('data-f')] = sel.value;
+      var field = e.target.closest('select[data-f], input[data-f]');
+      if (!field) return;
+      var i = Number(field.closest('.cond-row').getAttribute('data-i'));
+      s.conds[i][field.getAttribute('data-f')] = field.value;
       sync();
     });
     // 监听整个 cond-toolbar，包括头部和底部的添加按钮

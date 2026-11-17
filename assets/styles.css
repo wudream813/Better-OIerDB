@@ -337,11 +337,12 @@ a.pcard:hover {
   background: var(--primary-soft); border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
   border-radius: 4px; padding: 2px 8px; min-width: 48px; text-align: center;
 }
-.cond-row select {
+.cond-row select, .cond-row input[data-f="score"] {
   padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
   background: var(--surface); color: var(--ink); font-size: 13px; outline: none;
 }
-.cond-row select:focus {
+.cond-row input[data-f="score"] { width: 115px; flex: 0 1 115px; }
+.cond-row select:focus, .cond-row input[data-f="score"]:focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 15%, transparent);
 }
