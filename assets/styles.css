@@ -313,10 +313,21 @@ a.pcard:hover {
 }
 .toolbar .count { font-size: 12.5px; color: var(--muted); white-space: nowrap; }
 .cond-toolbar {
+  position: static; top: auto; z-index: auto;
   flex-direction: column; align-items: stretch; gap: 10px;
   background: var(--surface); border: 1px solid var(--line);
-  border-radius: var(--radius); padding: 14px 16px;
+  border-radius: var(--radius); padding: 10px 14px;
 }
+.cond-toolbar > .cond-summary {
+  display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap;
+  cursor: pointer; list-style: none; outline: none;
+}
+.cond-toolbar > .cond-summary::-webkit-details-marker { display: none; }
+.cond-toolbar > .cond-summary::before { content: '▸'; color: var(--primary); font-size: 14px; transition: transform .15s; }
+.cond-toolbar[open] > .cond-summary::before { transform: rotate(90deg); }
+.cond-toggle-label { margin-left: auto; font-size: 12px; color: var(--primary); white-space: nowrap; }
+.cond-panel { display: flex; flex-direction: column; gap: 10px; }
+.cond-toolbar[open] > .cond-panel { padding-top: 8px; }
 .cond-header {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; flex-wrap: wrap; margin-bottom: 2px;

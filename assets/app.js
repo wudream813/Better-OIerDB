@@ -751,22 +751,23 @@
         '</select>' +
         '<span class="count" id="pl-count"></span>' +
       '</div>' +
-      '<div class="toolbar cond-toolbar" style="margin-top:-8px">' +
-        '<div class="cond-header">' +
-          '<div class="cond-title-box">' +
-            '<span class="cond-title">🏅 奖项与赛事组合查找（列表模式）</span>' +
-            '<span class="cond-desc">每行对应一项要求，可按赛事、奖项、年份及精确分数组合；选手须同时满足所有条件（如：NOIP 二等奖、CSP提高 一等奖）</span>' +
-          '</div>' +
+      '<details id="cond-details" class="toolbar cond-toolbar" style="margin-top:-8px"' + (s.conds.some(condActive) ? ' open' : '') + '>' +
+        '<summary class="cond-summary">' +
+          '<span class="cond-title">🏅 奖项与赛事组合查找（列表模式）</span>' +
+          '<span class="cond-desc">每行对应一项要求，可按赛事、奖项、年份及精确分数组合；选手须同时满足所有条件</span>' +
+          '<span class="cond-toggle-label">展开 / 折叠</span>' +
+        '</summary>' +
+        '<div class="cond-panel">' +
           '<div class="cond-actions">' +
             '<input type="text" id="luogu-uid" inputmode="numeric" pattern="[0-9]*" maxlength="12" placeholder="洛谷 UID" aria-label="洛谷 UID" style="width:110px;padding:8px 10px;border:1px solid var(--line-strong);border-radius:var(--radius-sm);background:var(--surface);color:var(--ink)">' +
             '<button type="button" class="btn" id="import-luogu" title="读取洛谷公开主页的获奖信息并填入条件列表">从洛谷导入</button>' +
             '<button type="button" class="btn cond-add" data-add-cond aria-label="添加一个条件" title="添加一个条件">＋ 添加条件</button>' +
             '<button type="button" class="btn" id="btn-clear-conds" style="padding:5px 10px;font-size:12px" title="清空全部条件">清空条件</button>' +
           '</div>' +
+          '<div id="pl-conds" class="cond-list"></div>' +
+          '<div id="luogu-import-status" class="small muted" role="status" aria-live="polite" style="margin-top:8px">从公开主页的 lentille-context.data.prizes 读取结构化奖项；经 Jina Reader 获取原始 HTML，不会获取隐藏或登录后信息。</div>' +
         '</div>' +
-        '<div id="pl-conds" class="cond-list"></div>' +
-        '<div id="luogu-import-status" class="small muted" role="status" aria-live="polite" style="margin-top:8px">从公开主页的 lentille-context.data.prizes 读取结构化奖项；经 Jina Reader 获取原始 HTML，不会获取隐藏或登录后信息。</div>' +
-      '</div>' +
+      '</details>' +
       '<div id="pl-hint"></div>' +
       '<div id="players-list"></div>' +
       '</div>';
@@ -814,6 +815,7 @@
           throw new Error('没有找到可识别的公开获奖信息。请确认 UID 正确，且洛谷主页已公开获奖信息。');
         }
         s.conds = imported.conditions.slice(0, MAX_CONDS);
+        $('#cond-details').open = true;
         condBox.innerHTML = condRowsHtml();
         sync();
         var msg = '已从洛谷 UID ' + uid + (imported.username ? '（' + imported.username + '）' : '') + ' 导入 ' + s.conds.length + ' 条公开获奖条件。';
