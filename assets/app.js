@@ -583,19 +583,51 @@
      同一行内的各字段须落在同一条参赛记录上；多行之间须同时满足（可来自不同记录）。
      例：[NOIP · 二等奖] 与 [CSP提高 · 一等奖] = 同时拥有这两类记录的选手。 */
   var MAX_CONDS = 6;
+  var CONTEST_TYPE_LABELS = {
+    'NOIP': 'NOIP / NOIP提高（高中/历届）',
+    'CSP提高': 'CSP提高（CSP-S）',
+    'CSP入门': 'CSP入门（CSP-J）',
+    'NOIP提高': 'NOIP提高组',
+    'NOIP普及': 'NOIP普及组（初中）',
+    'NOI': 'NOI（全国决赛）',
+    'APIO': 'APIO（亚太奥赛）',
+    'WC': 'WC（冬令营）',
+    'CTSC': 'CTSC（国家队选拔）',
+    'IOI': 'IOI（国际信息奥赛）',
+    'NOID类': 'NOI D类'
+  };
+  var AWARD_LABELS = {
+    '一等奖': '一等奖（省一 / 国一）',
+    '二等奖': '二等奖（省二 / 国二）',
+    '三等奖': '三等奖（省三 / 国三）',
+    '金牌': '金牌',
+    '银牌': '银牌',
+    '铜牌': '铜牌'
+  };
   function emptyCond() { return { type: '', award: '', year: '' }; }
   function condActive(c) { return !!(c.type || c.award || c.year); }
   function matchConds(p, conds) {
     return conds.every(function (c) {
       return p.records.some(function (r) {
-        return (!c.type || r.contestType === c.type) &&
-          (!c.award || r.award === c.award) &&
-          (!c.year || String(r.year) === String(c.year));
+        var typeMatch = !c.type;
+        if (c.type) {
+          if (c.type === 'NOIP' || c.type === 'NOIP提高') {
+            typeMatch = (r.contestType === 'NOIP' || r.contestType === 'NOIP提高');
+          } else if (c.type === 'WC') {
+            typeMatch = (r.contestType === 'WC' || r.contestType === 'WC-AI');
+          } else {
+            typeMatch = (r.contestType === c.type);
+          }
+        }
+        var awardMatch = !c.award || r.award === c.award;
+        var yearMatch = !c.year || String(r.year) === String(c.year);
+        return typeMatch && awardMatch && yearMatch;
       });
     });
   }
   function describeCond(c) {
-    return esc(c.type || '任意赛事') + ' · ' + esc(c.award || '任意奖项') + ' · ' + (c.year ? esc(c.year) + ' 年' : '任意年份');
+    var typeDesc = (c.type === 'NOIP' || c.type === 'NOIP提高') ? 'NOIP / NOIP提高' : c.type;
+    return esc(typeDesc || '任意赛事') + ' · ' + esc(c.award || '任意奖项') + (c.year ? ' · ' + esc(c.year) + ' 年' : '');
   }
   function parseConds(pa) {
     if (pa.conds) {
@@ -617,7 +649,12 @@
 
   function renderPlayers() {
     var s = state.players;
-    var types = Array.from(new Set(DB.contests.map(function (c) { return c.type; }).filter(Boolean))).sort();
+    var rawTypes = Array.from(new Set(DB.contests.map(function (c) { return c.type; }).filter(Boolean)));
+    // 将 NOIP 和 NOIP提高 合并或者将 NOIP 置前
+    var priority = ['NOIP', 'CSP提高', 'CSP入门', 'NOIP普及', 'NOI', 'APIO', 'WC', 'CTSC', 'IOI'];
+    var types = priority.filter(function (t) { return rawTypes.indexOf(t) >= 0; }).concat(
+      rawTypes.filter(function (t) { return priority.indexOf(t) === -1; }).sort()
+    );
     var years = Array.from(new Set(DB.contests.map(function (c) { return c.year; }))).sort(function (a, b) { return b - a; });
     var awards = Object.keys(DB.awardOrder).sort(function (a, b) { return (DB.awardOrder[b] || 0) - (DB.awardOrder[a] || 0) || a.localeCompare(b, 'zh'); });
 
@@ -627,21 +664,27 @@
         return '<div class="cond-row" data-i="' + i + '">' +
           '<span class="cond-no">条件 ' + no + '</span>' +
           '<select data-f="type" aria-label="条件 ' + no + ' 赛事类型"><option value="">任意赛事类型</option>' +
-            types.map(function (t) { return '<option value="' + esc(t) + '"' + (c.type === t ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('') +
+            types.map(function (t) {
+              var lbl = CONTEST_TYPE_LABELS[t] || t;
+              return '<option value="' + esc(t) + '"' + (c.type === t ? ' selected' : '') + '>' + esc(lbl) + '</option>';
+            }).join('') +
           '</select>' +
           '<select data-f="award" aria-label="条件 ' + no + ' 奖项"><option value="">任意奖项</option>' +
-            awards.map(function (a) { return '<option value="' + esc(a) + '"' + (c.award === a ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('') +
+            awards.map(function (a) {
+              var lbl = AWARD_LABELS[a] || a;
+              return '<option value="' + esc(a) + '"' + (c.award === a ? ' selected' : '') + '>' + esc(lbl) + '</option>';
+            }).join('') +
           '</select>' +
           '<select data-f="year" aria-label="条件 ' + no + ' 比赛年份"><option value="">任意年份</option>' +
             years.map(function (y) { return '<option value="' + y + '"' + (String(c.year) === String(y) ? ' selected' : '') + '>' + y + ' 年</option>'; }).join('') +
           '</select>' +
-          (s.conds.length > 1 ? '<button type="button" class="btn" data-remove-cond="' + i + '" aria-label="移除条件 ' + no + '" title="移除此条件">−</button>' : '') +
+          (s.conds.length > 1 ? '<button type="button" class="btn btn-remove-cond" data-remove-cond="' + i + '" aria-label="移除条件 ' + no + '" title="移除此条件">✕ 移除</button>' : '') +
           '</div>';
       }).join('');
       var addBtn = s.conds.length < MAX_CONDS
         ? '<button type="button" class="btn cond-add" data-add-cond aria-label="添加一个条件" title="添加一个条件">＋ 添加条件</button>'
         : '<span class="small muted">最多 ' + MAX_CONDS + ' 个条件</span>';
-      return rows + '<div>' + addBtn + '</div>';
+      return rows + '<div class="cond-foot">' + addBtn + '<span class="small muted">每行各字段须在同一条参赛记录上满足；多行之间须同时满足。</span></div>';
     }
 
     view.innerHTML =
@@ -670,7 +713,16 @@
         '<span class="count" id="pl-count"></span>' +
       '</div>' +
       '<div class="toolbar cond-toolbar" style="margin-top:-8px">' +
-        '<div class="cond-title small muted">按奖项查找（多个条件须同时满足）</div>' +
+        '<div class="cond-header">' +
+          '<div class="cond-title-box">' +
+            '<span class="cond-title">🏅 奖项与赛事组合查找（列表模式）</span>' +
+            '<span class="cond-desc">每行对应一项荣誉要求，选手须同时满足所有条件（如：条件 1 选「NOIP 二等奖」，条件 2 选「CSP提高 一等奖」）</span>' +
+          '</div>' +
+          '<div class="cond-actions">' +
+            '<button type="button" class="btn cond-add" data-add-cond aria-label="添加一个条件" title="添加一个条件">＋ 添加条件</button>' +
+            '<button type="button" class="btn" id="btn-clear-conds" style="padding:5px 10px;font-size:12px" title="清空全部条件">清空条件</button>' +
+          '</div>' +
+        '</div>' +
         '<div id="pl-conds" class="cond-list"></div>' +
       '</div>' +
       '<div id="pl-hint"></div>' +
@@ -692,6 +744,12 @@
     grEl.addEventListener('change', function () { s.grade = grEl.value; sync(); });
     stEl.addEventListener('change', function () { s.sort = stEl.value; sync(); });
 
+    $('#btn-clear-conds').addEventListener('click', function () {
+      s.conds = [emptyCond()];
+      condBox.innerHTML = condRowsHtml();
+      sync();
+    });
+
     // 行内下拉框改变时只更新状态，不重绘整行，避免丢失焦点
     condBox.addEventListener('change', function (e) {
       var sel = e.target.closest('select[data-f]');
@@ -700,7 +758,8 @@
       s.conds[i][sel.getAttribute('data-f')] = sel.value;
       sync();
     });
-    condBox.addEventListener('click', function (e) {
+    // 监听整个 cond-toolbar，包括头部和底部的添加按钮
+    $('.cond-toolbar').addEventListener('click', function (e) {
       var add = e.target.closest('[data-add-cond]');
       var rm = e.target.closest('[data-remove-cond]');
       if (add && s.conds.length < MAX_CONDS) {
@@ -760,9 +819,9 @@
         '</div>';
     }
     if (active.length) {
-      hintHtml += '<div class="small muted" style="margin:0 0 10px">按 ' + active.length + ' 个条件<b>同时</b>筛选：' +
-        active.map(function (c, i) { return '<span class="cond-chip">条件 ' + (s.conds.indexOf(c) + 1) + '：' + describeCond(c) + '</span>'; }).join(' ') +
-        '。每行内的字段须在同一条参赛记录上满足；空白行不参与筛选。</div>';
+      hintHtml += '<div class="callout ok"><span class="ic">🏆</span><span>已启用 <b>' + active.length + ' 项荣誉组合筛选</b>：选手须同时具备 ' +
+        active.map(function (c) { return '「<b>' + describeCond(c) + '</b>」'; }).join(' 与 ') +
+        '。每行内的字段须在同一条参赛记录上满足；各条件可来自不同年份或赛事。</span></div>';
     }
     if (s.sort === 'grade' || s.sort === 'gradeDesc' || s.grade) {
       hintHtml += '<div class="small muted" style="margin:0 0 10px">年级按 <b>' + DB.season + '–' + (DB.season + 1) + ' 学年</b>推算：以最近一条记录的「当时年级」顺延，届别 = 预计高三毕业年份；7 月 NOI 记入上一学年。</div>';
