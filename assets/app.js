@@ -290,7 +290,7 @@
   var visible = { players: PAGE.players, search: PAGE.search, contest: PAGE.contest };
 
   var state = {
-    players: { q: '', province: '', grade: '', award: '', contestType: '', year: '', sort: 'source' },
+    players: { q: '', province: '', grade: '', awards: [], contestType: '', year: '', sort: 'source' },
     contest: { q: '', province: '', grade: '', school: '', sortKey: 'rank', sortDir: 1 },
     analysis: { tab: 'province', metric: 'people' },
     search: { q: '' }
@@ -607,8 +607,8 @@
         '<span class="count" id="pl-count"></span>' +
       '</div>' +
       '<div class="toolbar" style="margin-top:-8px">' +
-        '<select id="pl-award" aria-label="按奖项筛选"><option value="">全部奖项</option>' +
-          Object.keys(DB.awardOrder).sort(function (a, b) { return (DB.awardOrder[b] || 0) - (DB.awardOrder[a] || 0) || a.localeCompare(b, 'zh'); }).map(function (a) { return '<option value="' + esc(a) + '"' + (s.award === a ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('') +
+        '<select id="pl-award" aria-label="按多个奖项筛选（可多选）" multiple size="1" title="按住 Ctrl 或 Command 可选择多个奖项；选手需拥有全部所选奖项">' +
+          Object.keys(DB.awardOrder).sort(function (a, b) { return (DB.awardOrder[b] || 0) - (DB.awardOrder[a] || 0) || a.localeCompare(b, 'zh'); }).map(function (a) { return '<option value="' + esc(a) + '"' + (s.awards.indexOf(a) >= 0 ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('') +
         '</select>' +
         '<select id="pl-type" aria-label="按赛事类型筛选"><option value="">全部赛事类型</option>' +
           Array.from(new Set(DB.contests.map(function (c) { return c.type; }).filter(Boolean))).sort().map(function (t) { return '<option value="' + esc(t) + '"' + (s.contestType === t ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('') +
@@ -622,7 +622,7 @@
       '</div>';
 
     function sync() {
-      setParamsSilently(['players'], { q: s.q, province: s.province, grade: s.grade, award: s.award, type: s.contestType, year: s.year, sort: s.sort });
+      setParamsSilently(['players'], { q: s.q, province: s.province, grade: s.grade, awards: s.awards.join(','), type: s.contestType, year: s.year, sort: s.sort });
       visible.players = PAGE.players;
       renderPlayersList();
     }
@@ -632,7 +632,7 @@
     pvEl.addEventListener('change', function () { s.province = pvEl.value; sync(); });
     grEl.addEventListener('change', function () { s.grade = grEl.value; sync(); });
     stEl.addEventListener('change', function () { s.sort = stEl.value; sync(); });
-    awardEl.addEventListener('change', function () { s.award = awardEl.value; sync(); });
+    awardEl.addEventListener('change', function () { s.awards = Array.prototype.filter.call(awardEl.selectedOptions, function (o) { return o.value; }).map(function (o) { return o.value; }); sync(); });
     typeEl.addEventListener('change', function () { s.contestType = typeEl.value; sync(); });
     yearEl.addEventListener('change', function () { s.year = yearEl.value; sync(); });
     attachQuickSuggest(qEl, function (item) {
@@ -647,7 +647,7 @@
     var s = state.players;
     // The unfiltered list can be very large. Keep the default view responsive by
     // showing the source order directly instead of sorting every person on entry.
-    var unfiltered = !s.q && !s.province && !s.grade && !s.award && !s.contestType && !s.year;
+    var unfiltered = !s.q && !s.province && !s.grade && !s.awards.length && !s.contestType && !s.year;
     if (unfiltered && s.sort === 'source') {
       var total = DB.people.length;
       $('#pl-count').textContent = '共 ' + total + ' 位选手';
@@ -658,7 +658,7 @@
     }
     var list = DB.people.filter(function (p) {
       return (!s.province || p.province === s.province) && matchGradeFilter(p, s.grade) && matchPerson(s.q, p) &&
-        (!s.award || p.records.some(function (r) { return r.award === s.award; })) &&
+        (!s.awards.length || s.awards.every(function (award) { return p.records.some(function (r) { return r.award === award; }); })) &&
         (!s.contestType || p.records.some(function (r) { return r.contestType === s.contestType; })) &&
         (!s.year || p.records.some(function (r) { return String(r.year) === String(s.year); }));
     });
@@ -680,6 +680,9 @@
           return '<a class="chip school" href="#/players?q=' + encodeURIComponent(e.name) + '">🏫 ' + esc(e.name) + ' <span class="py">' + esc(e.ini) + '</span><span class="n">' + e.people + ' 人</span></a>';
         }).join('') +
         '</div>';
+    }
+    if (s.awards.length) {
+      hintHtml += '<div class="small muted" style="margin:0 0 10px">奖项筛选为「同时满足」：选手的记录中须分别包含 ' + s.awards.map(esc).join('、') + '。</div>';
     }
     if (s.sort === 'grade' || s.sort === 'gradeDesc' || s.grade) {
       hintHtml += '<div class="small muted" style="margin:0 0 10px">年级按 <b>' + DB.season + '–' + (DB.season + 1) + ' 学年</b>推算：以最近一条记录的「当时年级」顺延，届别 = 预计高三毕业年份；7 月 NOI 记入上一学年。</div>';
@@ -1347,7 +1350,7 @@
         return renderSearch();
       case 'players':
         setNav('players');
-        state.players = { q: pa.q || '', province: pa.province || '', grade: pa.grade || '', award: pa.award || '', contestType: pa.type || '', year: pa.year || '', sort: pa.sort || 'source' };
+        state.players = { q: pa.q || '', province: pa.province || '', grade: pa.grade || '', awards: (pa.awards || pa.award || '').split(',').filter(Boolean), contestType: pa.type || '', year: pa.year || '', sort: pa.sort || 'source' };
         return renderPlayers();
       case 'player':
         setNav('players');
