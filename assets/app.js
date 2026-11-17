@@ -607,9 +607,7 @@
         '<span class="count" id="pl-count"></span>' +
       '</div>' +
       '<div class="toolbar" style="margin-top:-8px">' +
-        '<select id="pl-award" aria-label="按多个奖项筛选（可多选）" multiple size="1" title="按住 Ctrl 或 Command 可选择多个奖项；选手需拥有全部所选奖项">' +
-          Object.keys(DB.awardOrder).sort(function (a, b) { return (DB.awardOrder[b] || 0) - (DB.awardOrder[a] || 0) || a.localeCompare(b, 'zh'); }).map(function (a) { return '<option value="' + esc(a) + '"' + (s.awards.indexOf(a) >= 0 ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('') +
-        '</select>' +
+        '<div id="pl-awards" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap" aria-label="奖项筛选"></div>' +
         '<select id="pl-type" aria-label="按赛事类型筛选"><option value="">全部赛事类型</option>' +
           Array.from(new Set(DB.contests.map(function (c) { return c.type; }).filter(Boolean))).sort().map(function (t) { return '<option value="' + esc(t) + '"' + (s.contestType === t ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('') +
         '</select>' +
@@ -627,12 +625,43 @@
       renderPlayersList();
     }
     var qEl = $('#pl-q'), pvEl = $('#pl-prov'), stEl = $('#pl-sort'), grEl = $('#pl-grade');
-    var awardEl = $('#pl-award'), typeEl = $('#pl-type'), yearEl = $('#pl-year');
+    var awardBox = $('#pl-awards'), typeEl = $('#pl-type'), yearEl = $('#pl-year');
+    var awardSlots = s.awards.length ? s.awards.slice() : [''];
+    var awardOptions = Object.keys(DB.awardOrder).sort(function (a, b) { return (DB.awardOrder[b] || 0) - (DB.awardOrder[a] || 0) || a.localeCompare(b, 'zh'); });
+    function drawAwardSlots() {
+      awardBox.innerHTML = awardSlots.map(function (value, i) {
+        var usedElsewhere = awardSlots.filter(function (x, j) { return j !== i && x; });
+        return '<span style="display:inline-flex;align-items:center;gap:4px">' +
+          '<select class="pl-award-slot" data-index="' + i + '" aria-label="奖项筛选 ' + (i + 1) + '"><option value="">选择奖项</option>' +
+          awardOptions.filter(function (a) { return !usedElsewhere.includes(a); }).map(function (a) { return '<option value="' + esc(a) + '"' + (value === a ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('') +
+          '</select>' + (i > 0 ? '<button type="button" class="btn" data-remove-award="' + i + '" aria-label="移除此奖项筛选" title="移除此奖项筛选" style="padding:4px 9px">−</button>' : '') +
+          '</span>';
+      }).join('') + '<button type="button" class="btn" data-add-award aria-label="添加一个奖项筛选" title="添加一个奖项筛选" style="padding:4px 10px;font-size:18px;line-height:1">+</button>';
+    }
+    drawAwardSlots();
     qEl.addEventListener('input', debounce(function () { s.q = qEl.value; sync(); }, 160));
     pvEl.addEventListener('change', function () { s.province = pvEl.value; sync(); });
     grEl.addEventListener('change', function () { s.grade = grEl.value; sync(); });
     stEl.addEventListener('change', function () { s.sort = stEl.value; sync(); });
-    awardEl.addEventListener('change', function () { s.awards = Array.prototype.filter.call(awardEl.selectedOptions, function (o) { return o.value; }).map(function (o) { return o.value; }); sync(); });
+    awardBox.addEventListener('change', function (e) {
+      if (!e.target.classList.contains('pl-award-slot')) return;
+      awardSlots[Number(e.target.getAttribute('data-index'))] = e.target.value;
+      s.awards = awardSlots.filter(Boolean);
+      drawAwardSlots();
+      sync();
+    });
+    awardBox.addEventListener('click', function (e) {
+      var add = e.target.closest('[data-add-award]');
+      var remove = e.target.closest('[data-remove-award]');
+      if (add) {
+        if (awardSlots.length < awardOptions.length) { awardSlots.push(''); drawAwardSlots(); }
+      } else if (remove) {
+        awardSlots.splice(Number(remove.getAttribute('data-remove-award')), 1);
+        s.awards = awardSlots.filter(Boolean);
+        if (!awardSlots.length) awardSlots.push('');
+        drawAwardSlots(); sync();
+      }
+    });
     typeEl.addEventListener('change', function () { s.contestType = typeEl.value; sync(); });
     yearEl.addEventListener('change', function () { s.year = yearEl.value; sync(); });
     attachQuickSuggest(qEl, function (item) {
