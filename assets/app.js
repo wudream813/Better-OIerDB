@@ -582,7 +582,7 @@
   /* 选手查询的条件列表：每一行是一个条件（赛事类型 + 奖项 + 年份，均可留空，至少填一项）。
      同一行内的各字段须落在同一条参赛记录上；多行之间须同时满足（可来自不同记录）。
      例：[NOIP · 二等奖] 与 [CSP提高 · 一等奖] = 同时拥有这两类记录的选手。 */
-  var MAX_CONDS = 6;
+  var MAX_CONDS = 20;
   var CONTEST_TYPE_LABELS = {
     'NOIP': 'NOIP / NOIP提高（高中/历届）',
     'CSP提高': 'CSP提高（CSP-S）',
@@ -604,6 +604,40 @@
     '银牌': '银牌',
     '铜牌': '铜牌'
   };
+  function normalizeLuoguAwardName(name) {
+    var n = String(name || '').replace(/\s+/g, ' ').trim();
+    var match = n.match(/(一等奖|二等奖|三等奖|金牌|银牌|铜牌)\s*$/);
+    if (!match) return null;
+    var award = match[1], eventName = n.slice(0, match.index).trim(), type = '';
+    if (/^CSP-S(?:$|\s|（)/i.test(eventName)) type = 'CSP提高';
+    else if (/^CSP-J(?:$|\s|（)/i.test(eventName)) type = 'CSP入门';
+    else if (/^NOIP\s*普及组/.test(eventName)) type = 'NOIP普及';
+    else if (/^NOIP\s*提高组/.test(eventName)) type = 'NOIP提高';
+    else if (/^NOIP$/.test(eventName)) type = 'NOIP';
+    else if (/^APIO(?:$|\s|（)/i.test(eventName)) type = 'APIO';
+    else if (/^NOI$/.test(eventName)) type = 'NOI';
+    else if (/^CTSC(?:$|\s)/i.test(eventName)) type = 'CTSC';
+    if (!type) return { award: award, eventName: eventName, unsupported: true };
+    return { type: type, award: award, eventName: eventName };
+  }
+  function parseLuoguAwards(markdown) {
+    var section = String(markdown || '').split(/###\s*获奖信息/i)[1];
+    if (!section) return { conditions: [], unsupported: [] };
+    section = section.split(/\n###\s/)[0];
+    var out = [], unsupported = [], seen = {};
+    section.split(/\r?\n/).forEach(function (line) {
+      var m = line.trim().match(/^\[(\d{4})\]\s*(.+)$/);
+      if (!m) return;
+      var parsed = normalizeLuoguAwardName(m[2]);
+      if (!parsed) return;
+      if (parsed.unsupported) { unsupported.push({ year: m[1], name: m[2] }); return; }
+      var key = parsed.type + '|' + parsed.award + '|' + m[1];
+      if (seen[key]) return;
+      seen[key] = true;
+      out.push({ type: parsed.type, award: parsed.award, year: m[1], score: '' });
+    });
+    return { conditions: out, unsupported: unsupported };
+  }
   function emptyCond() { return { type: '', award: '', year: '', score: '' }; }
   function condActive(c) { return !!(c.type || c.award || c.year || c.score !== ''); }
   function matchConds(p, conds) {
@@ -721,11 +755,14 @@
             '<span class="cond-desc">每行对应一项要求，可按赛事、奖项、年份及精确分数组合；选手须同时满足所有条件（如：NOIP 二等奖、CSP提高 一等奖）</span>' +
           '</div>' +
           '<div class="cond-actions">' +
+            '<input type="text" id="luogu-uid" inputmode="numeric" pattern="[0-9]*" maxlength="12" placeholder="洛谷 UID" aria-label="洛谷 UID" style="width:110px;padding:8px 10px;border:1px solid var(--line-strong);border-radius:var(--radius-sm);background:var(--surface);color:var(--ink)">' +
+            '<button type="button" class="btn" id="import-luogu" title="读取洛谷公开主页的获奖信息并填入条件列表">从洛谷导入</button>' +
             '<button type="button" class="btn cond-add" data-add-cond aria-label="添加一个条件" title="添加一个条件">＋ 添加条件</button>' +
             '<button type="button" class="btn" id="btn-clear-conds" style="padding:5px 10px;font-size:12px" title="清空全部条件">清空条件</button>' +
           '</div>' +
         '</div>' +
         '<div id="pl-conds" class="cond-list"></div>' +
+        '<div id="luogu-import-status" class="small muted" role="status" aria-live="polite" style="margin-top:8px">导入只读取洛谷公开主页展示的获奖条目；通过 Jina Reader 代理读取，不会获取隐藏或登录后信息。</div>' +
       '</div>' +
       '<div id="pl-hint"></div>' +
       '<div id="players-list"></div>' +
@@ -750,6 +787,39 @@
       s.conds = [emptyCond()];
       condBox.innerHTML = condRowsHtml();
       sync();
+    });
+
+    $('#import-luogu').addEventListener('click', function () {
+      var uid = $('#luogu-uid').value.trim();
+      var button = $('#import-luogu');
+      var status = $('#luogu-import-status');
+      if (!/^\d{1,12}$/.test(uid)) {
+        status.textContent = '请输入有效的纯数字洛谷 UID。';
+        return;
+      }
+      button.disabled = true;
+      status.textContent = '正在读取洛谷公开主页…';
+      fetch('https://r.jina.ai/https://www.luogu.com.cn/user/' + encodeURIComponent(uid), {
+        headers: { 'Accept': 'text/plain' }
+      }).then(function (response) {
+        if (!response.ok) throw new Error('读取失败（HTTP ' + response.status + '）。');
+        return response.text();
+      }).then(function (markdown) {
+        var imported = parseLuoguAwards(markdown);
+        if (!imported.conditions.length) {
+          if (imported.unsupported.length) throw new Error('页面包含获奖条目，但赛事名称暂不支持映射到本站赛事分类：' + imported.unsupported.map(function (x) { return x.name; }).join('；'));
+          throw new Error('没有找到可识别的公开获奖信息。请确认 UID 正确，且洛谷主页已公开获奖信息。');
+        }
+        s.conds = imported.conditions.slice(0, MAX_CONDS);
+        condBox.innerHTML = condRowsHtml();
+        sync();
+        var msg = '已从洛谷 UID ' + uid + ' 导入 ' + s.conds.length + ' 条公开获奖条件。';
+        if (imported.conditions.length > MAX_CONDS) msg += '因条件上限，另有 ' + (imported.conditions.length - MAX_CONDS) + ' 条未导入。';
+        if (imported.unsupported.length) msg += '另有 ' + imported.unsupported.length + ' 条赛事本站暂无对应分类，已跳过。';
+        status.textContent = msg;
+      }).catch(function (error) {
+        status.textContent = '导入失败：' + (error && error.message ? error.message : '无法读取洛谷公开主页') + '。可稍后重试或手动填写。';
+      }).then(function () { button.disabled = false; });
     });
 
     // 行内下拉框改变时只更新状态，不重绘整行，避免丢失焦点
