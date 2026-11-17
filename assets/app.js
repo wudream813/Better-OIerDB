@@ -604,39 +604,42 @@
     '银牌': '银牌',
     '铜牌': '铜牌'
   };
-  function normalizeLuoguAwardName(name) {
-    var n = String(name || '').replace(/\s+/g, ' ').trim();
-    var match = n.match(/(一等奖|二等奖|三等奖|金牌|银牌|铜牌)\s*$/);
-    if (!match) return null;
-    var award = match[1], eventName = n.slice(0, match.index).trim(), type = '';
-    if (/^CSP-S(?:$|\s|（)/i.test(eventName)) type = 'CSP提高';
-    else if (/^CSP-J(?:$|\s|（)/i.test(eventName)) type = 'CSP入门';
-    else if (/^NOIP\s*普及组/.test(eventName)) type = 'NOIP普及';
-    else if (/^NOIP\s*提高组/.test(eventName)) type = 'NOIP提高';
-    else if (/^NOIP$/.test(eventName)) type = 'NOIP';
-    else if (/^APIO(?:$|\s|（)/i.test(eventName)) type = 'APIO';
-    else if (/^NOI$/.test(eventName)) type = 'NOI';
-    else if (/^CTSC(?:$|\s)/i.test(eventName)) type = 'CTSC';
-    if (!type) return { award: award, eventName: eventName, unsupported: true };
+  function normalizeLuoguPrize(contest, prize) {
+    var eventName = String(contest || '').replace(/\s+/g, ' ').trim();
+    var eventMap = {
+      'NOIP 普及组': 'NOIP普及', 'NOIP 提高组': 'NOIP提高',
+      'CSP-S': 'CSP提高', 'CSP-J': 'CSP入门', 'NOIP': 'NOIP',
+      'APIO': 'APIO', 'APIO（中国区）': 'APIO', 'NOI': 'NOI', 'CTSC': 'CTSC'
+    };
+    var awardMap = {
+      '一等奖': '一等奖', '一等獎': '一等奖', '二等奖': '二等奖', '二等獎': '二等奖',
+      '三等奖': '三等奖', '三等獎': '三等奖', '金牌': '金牌', '銀牌': '银牌', '银牌': '银牌',
+      '銅牌': '铜牌', '铜牌': '铜牌'
+    };
+    var award = awardMap[String(prize || '').trim()];
+    var type = eventMap[eventName];
+    if (!award || !type) return { eventName: eventName, prize: String(prize || ''), unsupported: true };
     return { type: type, award: award, eventName: eventName };
   }
-  function parseLuoguAwards(markdown) {
-    var section = String(markdown || '').split(/###\s*获奖信息/i)[1];
-    if (!section) return { conditions: [], unsupported: [] };
-    section = section.split(/\n###\s/)[0];
+  function parseLuoguAwards(html) {
+    var match = String(html || '').match(/<script\b[^>]*id=["']lentille-context["'][^>]*>([\s\S]*?)<\/script>/i);
+    if (!match) return { conditions: [], unsupported: [], username: '' };
+    var context;
+    try { context = JSON.parse(match[1]); } catch (e) { return { conditions: [], unsupported: [], username: '' }; }
+    var data = context && context.data;
+    if (!data || !Array.isArray(data.prizes)) return { conditions: [], unsupported: [], username: data && data.user ? data.user.name || '' : '' };
     var out = [], unsupported = [], seen = {};
-    section.split(/\r?\n/).forEach(function (line) {
-      var m = line.trim().match(/^\[(\d{4})\]\s*(.+)$/);
-      if (!m) return;
-      var parsed = normalizeLuoguAwardName(m[2]);
-      if (!parsed) return;
-      if (parsed.unsupported) { unsupported.push({ year: m[1], name: m[2] }); return; }
-      var key = parsed.type + '|' + parsed.award + '|' + m[1];
+    data.prizes.forEach(function (item) {
+      var p = item && item.prize;
+      if (!p || p.year == null) return;
+      var parsed = normalizeLuoguPrize(p.contest, p.prize);
+      if (parsed.unsupported) { unsupported.push({ year: String(p.year), name: parsed.eventName + ' ' + parsed.prize }); return; }
+      var key = parsed.type + '|' + parsed.award + '|' + p.year;
       if (seen[key]) return;
       seen[key] = true;
-      out.push({ type: parsed.type, award: parsed.award, year: m[1], score: '' });
+      out.push({ type: parsed.type, award: parsed.award, year: String(p.year), score: '' });
     });
-    return { conditions: out, unsupported: unsupported };
+    return { conditions: out, unsupported: unsupported, username: data.user ? data.user.name || '' : '' };
   }
   function emptyCond() { return { type: '', award: '', year: '', score: '' }; }
   function condActive(c) { return !!(c.type || c.award || c.year || c.score !== ''); }
@@ -762,7 +765,7 @@
           '</div>' +
         '</div>' +
         '<div id="pl-conds" class="cond-list"></div>' +
-        '<div id="luogu-import-status" class="small muted" role="status" aria-live="polite" style="margin-top:8px">导入只读取洛谷公开主页展示的获奖条目；通过 Jina Reader 代理读取，不会获取隐藏或登录后信息。</div>' +
+        '<div id="luogu-import-status" class="small muted" role="status" aria-live="polite" style="margin-top:8px">从公开主页的 lentille-context.data.prizes 读取结构化奖项；经 Jina Reader 获取原始 HTML，不会获取隐藏或登录后信息。</div>' +
       '</div>' +
       '<div id="pl-hint"></div>' +
       '<div id="players-list"></div>' +
@@ -800,7 +803,7 @@
       button.disabled = true;
       status.textContent = '正在读取洛谷公开主页…';
       fetch('https://r.jina.ai/https://www.luogu.com.cn/user/' + encodeURIComponent(uid), {
-        headers: { 'Accept': 'text/plain' }
+        headers: { 'Accept': 'text/plain', 'X-Return-Format': 'html' }
       }).then(function (response) {
         if (!response.ok) throw new Error('读取失败（HTTP ' + response.status + '）。');
         return response.text();
@@ -813,7 +816,7 @@
         s.conds = imported.conditions.slice(0, MAX_CONDS);
         condBox.innerHTML = condRowsHtml();
         sync();
-        var msg = '已从洛谷 UID ' + uid + ' 导入 ' + s.conds.length + ' 条公开获奖条件。';
+        var msg = '已从洛谷 UID ' + uid + (imported.username ? '（' + imported.username + '）' : '') + ' 导入 ' + s.conds.length + ' 条公开获奖条件。';
         if (imported.conditions.length > MAX_CONDS) msg += '因条件上限，另有 ' + (imported.conditions.length - MAX_CONDS) + ' 条未导入。';
         if (imported.unsupported.length) msg += '另有 ' + imported.unsupported.length + ' 条赛事本站暂无对应分类，已跳过。';
         status.textContent = msg;
