@@ -629,15 +629,18 @@
     var data = context && context.data;
     if (!data || !Array.isArray(data.prizes)) return { conditions: [], unsupported: [], username: data && data.user ? data.user.name || '' : '' };
     var out = [], unsupported = [], seen = {};
-    data.prizes.forEach(function (item) {
+    data.prizes.forEach(function (item, index) {
       var p = item && item.prize;
-      if (!p || p.year == null) return;
+      if (!p) return;
+      var year = p.year == null ? '' : String(p.year);
       var parsed = normalizeLuoguPrize(p.contest, p.prize);
-      if (parsed.unsupported) { unsupported.push({ year: String(p.year), name: parsed.eventName + ' ' + parsed.prize }); return; }
-      var key = parsed.type + '|' + parsed.award + '|' + p.year + '|' + (p.score == null ? '' : p.score);
+      if (parsed.unsupported) { unsupported.push({ year: year, name: parsed.eventName + ' ' + parsed.prize }); return; }
+      // Keep separate yearless entries: the source has not supplied enough
+      // information to safely decide whether they are duplicates.
+      var key = parsed.type + '|' + parsed.award + '|' + (year || 'unknown-' + index) + '|' + (p.score == null ? '' : p.score);
       if (seen[key]) return;
       seen[key] = true;
-      out.push({ type: parsed.type, award: parsed.award, year: String(p.year), score: p.score == null ? '' : String(p.score) });
+      out.push({ type: parsed.type, award: parsed.award, year: year, score: p.score == null ? '' : String(p.score) });
     });
     return { conditions: out, unsupported: unsupported, username: data.user ? data.user.name || '' : '' };
   }
