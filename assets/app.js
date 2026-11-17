@@ -290,7 +290,7 @@
   var visible = { players: PAGE.players, search: PAGE.search, contest: PAGE.contest };
 
   var state = {
-    players: { q: '', province: '', grade: '', award: '', contestType: '', year: '', sort: 'count' },
+    players: { q: '', province: '', grade: '', award: '', contestType: '', year: '', sort: 'source' },
     contest: { q: '', province: '', grade: '', school: '', sortKey: 'rank', sortDir: 1 },
     analysis: { tab: 'province', metric: 'people' },
     search: { q: '' }
@@ -596,6 +596,7 @@
           '<option value="已毕业"' + (s.grade === '已毕业' ? ' selected' : '') + '>已毕业</option>' +
         '</select>' +
         '<select id="pl-sort">' +
+          '<option value="source"' + (s.sort === 'source' ? ' selected' : '') + '>按数据源顺序</option>' +
           '<option value="count"' + (s.sort === 'count' ? ' selected' : '') + '>按记录数</option>' +
           '<option value="award"' + (s.sort === 'award' ? ' selected' : '') + '>按最佳奖项</option>' +
           '<option value="recent"' + (s.sort === 'recent' ? ' selected' : '') + '>按最近活跃</option>' +
@@ -644,6 +645,17 @@
 
   function renderPlayersList() {
     var s = state.players;
+    // The unfiltered list can be very large. Keep the default view responsive by
+    // showing the source order directly instead of sorting every person on entry.
+    var unfiltered = !s.q && !s.province && !s.grade && !s.award && !s.contestType && !s.year;
+    if (unfiltered && s.sort === 'source') {
+      var total = DB.people.length;
+      $('#pl-count').textContent = '共 ' + total + ' 位选手';
+      $('#pl-hint').innerHTML = '<div class="small muted" style="margin:0 0 10px">默认按数据源顺序分页显示；可选择奖项、赛事类型、年份等条件筛选，或更改排序方式。</div>';
+      $('#players-list').innerHTML = '<div class="people-grid">' + DB.people.slice(0, visible.players).map(personCard).join('') + '</div>' +
+        (total > visible.players ? '<button class="btn more-results" data-act="more-players">加载更多选手（已显示 ' + visible.players + ' / ' + total + '）</button>' : '');
+      return;
+    }
     var list = DB.people.filter(function (p) {
       return (!s.province || p.province === s.province) && matchGradeFilter(p, s.grade) && matchPerson(s.q, p) &&
         (!s.award || p.records.some(function (r) { return r.award === s.award; })) &&
@@ -1335,7 +1347,7 @@
         return renderSearch();
       case 'players':
         setNav('players');
-        state.players = { q: pa.q || '', province: pa.province || '', grade: pa.grade || '', award: pa.award || '', contestType: pa.type || '', year: pa.year || '', sort: pa.sort || 'count' };
+        state.players = { q: pa.q || '', province: pa.province || '', grade: pa.grade || '', award: pa.award || '', contestType: pa.type || '', year: pa.year || '', sort: pa.sort || 'source' };
         return renderPlayers();
       case 'player':
         setNav('players');
