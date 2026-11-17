@@ -382,9 +382,9 @@
   function gradeOrder(p) { return p.currentGradeIndex == null ? 99 : p.currentGradeIndex; }
 
   function getProvinces() {
-    var m = {};
-    DB.people.forEach(function (p) { m[p.province] = 1; });
-    return Object.keys(m).sort(function (a, b) { return a.localeCompare(b, 'zh'); });
+    // The province index is already built during data loading; avoid another
+    // full pass over every player just to populate the filter dropdown.
+    return Object.keys(DB.provinceIndex).sort(function (a, b) { return a.localeCompare(b, 'zh'); });
   }
 
   var GRADES = ['初一', '初二', '初三', '高一', '高二', '高三'];
