@@ -634,10 +634,10 @@
       if (!p || p.year == null) return;
       var parsed = normalizeLuoguPrize(p.contest, p.prize);
       if (parsed.unsupported) { unsupported.push({ year: String(p.year), name: parsed.eventName + ' ' + parsed.prize }); return; }
-      var key = parsed.type + '|' + parsed.award + '|' + p.year;
+      var key = parsed.type + '|' + parsed.award + '|' + p.year + '|' + (p.score == null ? '' : p.score);
       if (seen[key]) return;
       seen[key] = true;
-      out.push({ type: parsed.type, award: parsed.award, year: String(p.year), score: '' });
+      out.push({ type: parsed.type, award: parsed.award, year: String(p.year), score: p.score == null ? '' : String(p.score) });
     });
     return { conditions: out, unsupported: unsupported, username: data.user ? data.user.name || '' : '' };
   }
@@ -765,7 +765,7 @@
             '<button type="button" class="btn" id="btn-clear-conds" style="padding:5px 10px;font-size:12px" title="清空全部条件">清空条件</button>' +
           '</div>' +
           '<div id="pl-conds" class="cond-list"></div>' +
-          '<div id="luogu-import-status" class="small muted" role="status" aria-live="polite" style="margin-top:8px">从公开主页的 lentille-context.data.prizes 读取结构化奖项；经 Jina Reader 获取原始 HTML，不会获取隐藏或登录后信息。</div>' +
+          '<div id="luogu-import-status" class="small muted" role="status" aria-live="polite" style="margin-top:8px">从公开主页的 lentille-context.data.prizes 读取奖项及页面公开的精确分数；经 Jina Reader 获取原始 HTML，不会获取隐藏或登录后信息。</div>' +
         '</div>' +
       '</details>' +
       '<div id="pl-hint"></div>' +
